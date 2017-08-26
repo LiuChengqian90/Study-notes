@@ -691,7 +691,327 @@ put_cpu_var(ptr);
 
 ## A：第15章 进程地址空间	
 
+内核除了管理本身的内存外，还必须管理用户空间的内存，即进程地址空间，也就是系统中每个用户空间进程所看到的内存。Linux采用虚拟内存技术，因此，系统中的所有进程之间以虚拟方式共享内存。对一个进程而言，它好像都可以访问整个系统的所有物理内存。更重要的是，即使单独一个进程，它拥有的地址空间也可以远远大于系统物理内存。
+
+### 地址空间
+
+进程地址空间由进程可寻址的虚拟内存组成，更为重要的特点是内核允许进程使用这种虚拟内存的地址。每个进程都有一个32位或64位的平坦（flat）地址空间，空间的具体大小取决于体系结构。“平坦”指的是地址空间范围是一个独立的连续区间（比如，地址从0x00000000扩展到0xffffffff的32位地址空间）。
+
+一些操作系统提供了段地址空间，这种地址空间并非是一个独立的线性区域，而是被分段的，但现代采用虚拟内存的操作系统通常都使用平坦地址空间而不是分段式的内存模式。通常情况下，每个进程都有唯一的这种平坦地址空间。一个进程的地址空间与另一个进程的地址空间即使有相同的内存地址，实际上也彼此互不相干。我们称这样的进程为线程。
+
+内存地址是一个给定的值，它要在地址空间范围之内，比如4021f000。这个值表示的是进程32位地址空间中的一个特定的字节。尽管一个进程可以寻址4GB的虚拟内存（在32位的地址空间中），但这并不代表它就有权访问所有的虚拟地址。在地址空间中，我们更为关心的是一些虚拟内存的地址区间，它们可被进程访问。这些可被访问的合法地址空间称为内存区域（mempry areas）。通过内核，进程可以给自己的地址空间动态地添加或减少内存区域。
+
+进程只能访问有效内存区域内的内存地址。每个内存区域也具有相关权限，如对相关进程有可读、可写、可执行属性。如果一个进程访问了不在有效范围中的内存区域，或以不正确的方式访问了有效地址，那么内核就会终止该进程，并返回“段错误”信息。
+
+内存区域可以包含各种内存对象，比如:
+
+- 可执行文件代码的内存映射，称为代码段（text section）。
+- 可执行文件的已初始化全局变量的内存映射，称为数据段（data section）。
+- 包含未初始化全局变量，也就是bss段（Block Started by Symbol）的零页(页面中的信息全部为0值，所以可用于映射bss段等目的)的内存映射。
+- 用于进程用户空间栈（不要和进程内核栈混淆，进程的内核栈独立存在并由内核维护）的零页的内存映射。
+- 每一个诸如C库或动态连接程序等共享库的代码段、数据段和bss也会被载入进程的地址空间。
+- 任何内存映射文件。
+- 任何共享内存段。
+- 任何匿名的内存映射，比如由malloc()分配的内存。
+
+进程地址空间中的任何有效地址都只能位于唯一的区域，这些内存区域不能相互覆盖。可以看到，在执行的进程中，每个不同的内存片段都对应一个独立的内存区域:栈、对象代码、全局变量、被映射的文件等。
+
+### 内存描述符
+
+内核使用内存描述符结构体表示进程的地址空间，该结构包含了和进程地址空间有关的全部信息。内存描述符由mm_struct结构体表示，定义在<linux/sched.h>中。
+
+```c
+struct mm_struct {
+	struct vm_area_struct * mmap;		/*（虚拟）内存区域链表*/
+	struct rb_root mm_rb;				/*VMA形成的红黑树*/
+	struct vm_area_struct * mmap_cache;	/*最近使用的内存区域*/
+#ifdef CONFIG_MMU
+	unsigned long (*get_unmapped_area) (struct file *filp,
+				unsigned long addr, unsigned long len,
+				unsigned long pgoff, unsigned long flags);
+	void (*unmap_area) (struct mm_struct *mm, unsigned long addr);
+#endif
+	unsigned long mmap_base;		/* map映射的基地址 */
+	unsigned long task_size;		/* 任务空间大小 */
+	unsigned long cached_hole_size; 	/* free_area_cache下最大的空洞 */
+	unsigned long free_area_cache;		/* 地址空间第一个空洞 */
+	pgd_t * pgd;				/*全局页表，进行地址转换*/
+	atomic_t mm_users;			/*使用地址空间的用户数*/
+	atomic_t mm_count;			/* 对此结构有多少引用 */
+	int map_count;				/* 内存区域数 */
+	struct rw_semaphore mmap_sem;	/*内存区域信号量*/
+	spinlock_t page_table_lock;		/* 页表锁 */
+	struct list_head mmlist;		/*所有mm_struct形成的链表*/
+	unsigned long hiwater_rss;	/* RSS高水位*/
+	unsigned long hiwater_vm;	/* 虚拟内存高水位 */
+
+	unsigned long total_vm, locked_vm, shared_vm, exec_vm;
+	unsigned long stack_vm, reserved_vm, def_flags, nr_ptes;
+	unsigned long start_code, end_code, start_data, end_data;	/*代码段的首地址、尾地址，数据段的首地址、尾地址*/
+	unsigned long start_brk, brk, start_stack;	/*堆的首地址、尾地址、进程栈的首地址*/
+	unsigned long arg_start, arg_end, env_start, env_end;	/*命令行参数的首地址、尾地址，环境变量的首地址、尾地址*/
+	unsigned long saved_auxv[AT_VECTOR_SIZE]; /* 保存的auxv /proc/PID/auxv */
+
+	/*
+	 * Special counters, in some configurations protected by the
+	 * page_table_lock, in other configurations by being atomic.
+	 */
+	struct mm_rss_stat rss_stat;
+	struct linux_binfmt *binfmt;
+	cpumask_t cpu_vm_mask;		/*lazy TLB交换掩码*/	
+	mm_context_t context;		/* 体系结构特殊数据 */
+	/* Swap token stuff */
+	/*
+	 * Last value of global fault stamp as seen by this process.
+	 * In other words, this value gives an indication of how long
+	 * it has been since this task got the token.
+	 * Look at mm/thrash.c
+	 */
+	unsigned int faultstamp;
+	unsigned int token_priority;
+	unsigned int last_interval;
+
+	unsigned long flags; /* 状态标志 */
+	struct core_state *core_state; /* 核心转储支持 coredumping support */
+#ifdef CONFIG_AIO
+	spinlock_t		ioctx_lock;		/*AIO I/O链表锁*/
+	struct hlist_head	ioctx_list;	/*AIO I/O链表*/
+#endif
+#ifdef CONFIG_MM_OWNER
+	/*
+	 * "owner" points to a task that is regarded as the canonical
+	 * user/owner of this mm. All of the following must be true in
+	 * order for it to be changed:
+	 *
+	 * current == mm->owner
+	 * current->mm != mm
+	 * new_owner->mm == mm
+	 * new_owner->alloc_lock is held
+	 */
+	struct task_struct *owner;
+#endif
+
+#ifdef CONFIG_PROC_FS
+	/* store ref to file /proc/<pid>/exe symlink points to */
+	struct file *exe_file;
+	unsigned long num_exe_file_vmas;
+#endif
+#ifdef CONFIG_MMU_NOTIFIER
+	struct mmu_notifier_mm *mmu_notifier_mm;
+#endif
+};
+```
+
+mm_users域记录正在使用该地址的进程数目。如果两个线程共享该地址空间，那么mm_users的值便等于2；mm_count域是mm_strut结构体的主引用计数。所有的mm_users都等于mm_count的增加量。这样，在前面的例子中，mm_count就仅仅为1。如果有9个线程共享某个地址空间，那么mm_user将会是9，而mm_count的值将再次为1。当mm_user的值减为0（所有使用该地址的线程全部退出）时，mm_count域的值才变为0。当mm_count的值等于0，说明已经没有任何指向该结构体的引用了，这时该结构体会被撤销。当内核在一个地址空间上操作，并需要使用与该地址相关联的引用计数时，内核便增加mm_count。内核同时使用这两个计数器是为了区别主使用计数器和使用该地址空间的进程的数目。
+
+mmap和mm_rt这两个不同数据结构体描述的对象是相同的:该地址空间中的全部内存区域。但是前者以链表形式存放而后者以红-黑树的形式存放。
+
+内核通常会避免使用两种数据结构组织同一种数据，但此处内核这样的冗余确实派得上用场。mmap结构体作为链表，利于简单、高效地遍历所有元素;而mm_rb结构体作为红一黑树，更适合搜索指定元素。内核并没有复制mm_struct结构体，而仅仅被包含其中。
+
+所有的mm_struct结构体都通过自身的mmlist域连接在一个双向链表中，该链表的首元素是init_mm内存描述符，它代表init进程的地址空间。另外，操作该链表的时候需要使用mmlist_lock锁来防止并发访问，该锁定义在文件<kernel/fork.c>中。
+
+在进程描述符（<linux/sched.h>中定义的task_struct结构体）中，mm域存放着该进程的内存描述符，所以current->mm便指向当前进程的内存描述符。
+
+fork()函数利用copy_mm()函数复制父进程的内存描述符，也就是current->mm域给其子进程，而子进程中的mm_struct结构体实际是通过文件kernel/fork.c中的allocate_mm()宏从mm_cachep slab缓存中分配得到的。
+
+```c
+#define allocate_mm()	(kmem_cache_alloc(mm_cachep, GFP_KERNEL))
+oldmm = current->mm;
+memcpy(mm, oldmm, sizeof(*mm));
+```
+
+通常，每个进程都有唯一的mm_struct结构体，即唯一的进程地址空间。
+
+如果父进程希望和其子进程共享地址空间，可以在调用clone()时，设置CLONE_VM标志。我们把这样的进程称作线程。是否共享地址空间几乎是进程和Linux中所谓的线程间本质上的唯一区别。除此以外，Linux内核并不区别对待它们，线程对内核来说仅仅是一个共享特定资源的进程而已。
+
+当CLONE_VM被指定后，内核就不再需要调用allocate_mm函数了，而仅仅需要在调用copy_mm函数中将mm域指向其父进程的内存描述符就可以了：
+
+```c
+/*代码有省略*/
+oldmm = current->mm;
+if (clone_flags & CLONE_VM) {
+		atomic_inc(&oldmm->mm_users);
+		mm = oldmm;
+		goto good_mm;
+	}
+tsk->mm = mm;
+```
+
+当进程退出时，内核会调用定义在<kernel/exit.c>中的exit_mm()函数，该函数执行一些常规的撤销工作，同时更新一些统计量。其中，该函数会调用mmput()函数减少内存描述符中的mm_user用户计数，如果用户计数降到零，将调用mmdrop()函数，减少mm_count使用计数。如果使用计数也等于零了，说明该内存描迷符不再有任何使用者了，那么调用free_mm()宏通过kmem_cache_free()函数将mm_struct结构体归还到mm_cachep slab缓存中。
+
+内核线程没有进程地址空间，也没有相关的内存描述符。所以内核线程对应的进程描述符中mm域为空。事实上，这也正是内核线程的真实含义—它们没有用户上下文。
+
+内核线程并不需要访问任何用户空间的内存(那它们访问谁的呢?)，而且因为内核线程在用户空间中没有任何页，所以实际上它们并不需要有自己的内存描述符和页表。尽管如此，即使访问内核内存，内核线程也还是需要使用一些数据的，比如页表。为了避免内核线程为内存描述符和页表浪费内存，也为了当新内核线程运行时，避免浪费处理器周期向新地址空间进行切换，内核线程将直接使用前一个进程的内存描述符。
+
+当一个进程被调度时，该进程的mm域指向的地址空间被装载到内存，进程描述符中的active_mm域会被更新，指向新的地址空间。内核线程没有地址空间，所以mm城为NULL。于是，当一个内核线程被调度时，内核发现它的mm域为NULL，就会保留前一个进程的地址空间，随后内核更新内核线程对应的进程描述符中的active_mm域，使其指向前一个进程的内存描述符。所以在需要时，内核线程便可以使用前一个进程的页表。因为内核线程不访问用户空间的内存，所以它们仅仅使用地址空间中和内核内存相关的信息，这些信息的含义和普通进程完全相同。
+
+### 虚拟内存区域
+
+内存区域由vm_area_struct结构体描述，定义在文件<linux/mm_types.h>中。内存区域在Linux内核中也经常称作虚拟内存区域（virtual memory Areas，VMAs）。
+
+vm_area_struct结构体描述了指定地址空间内连续区间上的一个独立内存范围。内核将每个内存区域作为一个单独的内存对象管理，每个内存区域都拥有一致的属性，比如访问权限等，另外，相应的操作也都一致。按照这样的方式，每一个VMA就可以代表不同类型的内存区域（比如内存映射文件或者进程用户空间栈），下面给出该结构定义和各个域的描述:
+
+```c
+struct vm_area_struct {
+	struct mm_struct * vm_mm;	/* 所属的mm_struct结构体 */
+	unsigned long vm_start;		/* 区间的首地址 */
+	unsigned long vm_end;		/* 区间的尾地址 */	
+	struct vm_area_struct *vm_next;		/* VMA链表 */
+
+	pgprot_t vm_page_prot;		/* 访问此区间的权限 */
+	unsigned long vm_flags;		/* 标志 mm.h. */
+
+	struct rb_node vm_rb;		/*红黑树上的该VMA节点*/
+	/* 或者关联于 address_space->i_mmap字段，或者关联于 address_space->i_mmap_nonlinear字段*/
+	union {
+		struct {
+			struct list_head list;
+			void *parent;	/* aligns with prio_tree_node parent */
+			struct vm_area_struct *head;
+		} vm_set;
+		struct raw_prio_tree_node prio_tree_node;
+	} shared;
+
+	struct list_head anon_vma_chain; /* anon_vma项，Serialized by 	mmap_sem & * page_table_lock*/
+	struct anon_vma *anon_vma;	/* 匿名VMA对象 page_table_lock */
+	const struct vm_operations_struct *vm_ops;	/* 相关操作表 */
+	/* Information about our backing store: */
+	unsigned long vm_pgoff;		/* Offset (within vm_file) in PAGE_SIZE
+					   units, *not* PAGE_CACHE_SIZE */
+	struct file * vm_file;		/* 被映射的文件(can be NULL). */
+	void * vm_private_data;		/* 私有数据was vm_pte (shared mem) */
+	unsigned long vm_truncate_count;/* truncate_count or restart_addr */
+#ifndef CONFIG_MMU
+	struct vm_region *vm_region;	/* NOMMU mapping region */
+#endif
+#ifdef CONFIG_NUMA
+	struct mempolicy *vm_policy;	/* NUMA policy for the VMA */
+#endif
+};
+```
+
+每个内存描述符都对应于进程地址空间中的唯一区间。vm_start域指向区间的首地址〔最低地址)，vm_end域指向区间的尾地址(最高地址)之后的第一个字节，也就是说，vm_start是内存区间的开始地址(它本身在区间内)，而vm_end是内存区间的结束地址（它本身在区间外），因此，vm_end-vm_start的大小便是内存区间的长度，内存区域的位置就在[vm_start, vm_end]之中。注意，在同一个地址空间内的不同内存区间不能重益。
+
+vm_mm域指向和VMA相关的mm_struct结构体，注意，每个VMA对其相关的mm_struct 结构体来说都是唯一的，所以即使两个独立的进程将同一个文件映射到各自的地址空间，它们分别都会有一个vm_area_struct结构体来标志自己的内存区域;反过来，如果两个线程共享一个地址空间，那么它们也同时共享其中的所有vm_area_struct结构体。
+
+VMA标志（vm_flags）是一种位标志，定义在<linux/mm.h>，标志了内存区域所包含的页面的行为和信息。和物理页的访问权限不同，VMA标志反映了内核处理页面所需要遵守的行为准则，而不是硬件要求。而且，vm_flags同时也包含了内存区域中每个页面的信息，或内存区域的整体信息，而不是具体的独立页面。
+
+VM_READ、VM_WRITE和VM_EXEC标志了内存区域中页面的读、写和执行权限。这些标志根据要求组合构成VMA的访问控制权限。
+
+VM_SHARED指明了内存区域包含的映射是否可以在多进程间共享。如果设置，则成为共享映射，否则称为私有映射。
+
+VM_IO标志内存区域中包含了对设备I/O空间的映射。通常在设备驱动程序执行mmap()函数进行I/O空间映射时才被设置，同时该标志也表示该内存区域不能被包含在任何进程的存放转存（core dump）中。VM_RESERVED标志规定了内存区域不能被换出，它也是在设备驱动程序进行映射时被设置。
+
+VM_SEQ_READ标志暗示内核应用程序对映射内容执行有序的(线性和连续的)读操作。这样，内核可以有选择地执行预读文件。VM_RAND_READ标志的意义正好相反，暗示应用程序对映射内容执行随机的(非有序的)读操作。因此内核可以有选择地减少或彻底取消文件预读。这两个标志可以通过系统调用madvise()设置，设置参数分别是MADV_SEQUENTIAL和MADV_RANDOM。
+
+vm_area_struct中的vm_ops域指向与指定内存区域相关的操作函数表，内核使用表中的方法操作VMA。vm_area_struct作为通用对象代表了任何类型的内存区域。函数表由vm_operations_struct结构体表示，定义在<linux/mm.h>中：
+
+```c
+struct vm_operations_struct {
+  	/*指定的内存区域被加入到一个地址空间时调用*/
+	void (*open)(struct vm_area_struct * area);
+  	/*指定的内存区域从地址空间删除时调用*/
+	void (*close)(struct vm_area_struct * area);
+  	/*没有出现在物理内存中的页被访问时，页面故障处理调用*/
+	int (*fault)(struct vm_area_struct *vma, struct vm_fault *vmf);
+	/* notification that a previously read-only page is about to become
+	 * writable, if an error is returned it will cause a SIGBUS */
+	int (*page_mkwrite)(struct vm_area_struct *vma, struct vm_fault *vmf);
+	/* called by access_process_vm when get_user_pages() fails, typically
+	 * for use by special VMAs that can switch between memory and hardware
+	 */
+	int (*access)(struct vm_area_struct *vma, unsigned long addr,
+		      void *buf, int len, int write);
+#ifdef CONFIG_NUMA
+	/*
+	 * set_policy() op must add a reference to any non-NULL @new mempolicy
+	 * to hold the policy upon return.  Caller should pass NULL @new to
+	 * remove a policy and fall back to surrounding context--i.e. do not
+	 * install a MPOL_DEFAULT policy, nor the task or system default
+	 * mempolicy.
+	 */
+	int (*set_policy)(struct vm_area_struct *vma, struct mempolicy *new);
+	/*
+	 * get_policy() op must add reference [mpol_get()] to any policy at
+	 * (vma,addr) marked as MPOL_SHARED.  The shared policy infrastructure
+	 * in mm/mempolicy.c will do this automatically.
+	 * get_policy() must NOT add a ref if the policy at (vma,addr) is not
+	 * marked as MPOL_SHARED. vma policies are protected by the mmap_sem.
+	 * If no [shared/vma] mempolicy exists at the addr, get_policy() op
+	 * must return NULL--i.e., do not "fallback" to task or system default
+	 * policy.
+	 */
+	struct mempolicy *(*get_policy)(struct vm_area_struct *vma,
+					unsigned long addr);
+	int (*migrate)(struct vm_area_struct *vma, const nodemask_t *from,
+		const nodemask_t *to, unsigned long flags);
+#endif
+};
+```
+
+mmap和mm_rb，这两个域各自独立地指向与内存描述符相关的全体内存区域对象。包含完全相同的vm_area_struct结构体指针，仅仅组织方法不同。
+
+mmap域使用单链表连接所有的内存区域对象。vm_area_struct结构体通过自身的vm_next域被连入链表，所有的区域按地址增长的方向排序，mmap域指向链表中第一个内存区域，链中最后一个结构体指针指向空。
+
+mm_rb域使用红-黑树连接所有的内存区域对象。mm_rb域指向红-黑树的根节点，地址空间中每一个vm_aera_struct结构体通过自身的vm_rb域连接到树中。
+链表用于需要追历全部节点的时候，而红-黑树适用于在地址空间中定位特定内存区域的时候。内核为了内存区域上的各种不同操作都能获得高性能，所以同时使用了这两种数据结构。
+
+可以使用/proc文件系统和pmap(1)根据查看指定进程的内存空间和其中所含的内存区域。/proc/<pid>/maps。
+
+内核时常需要在某个内存区域上执行一些操作，比如某个指定地址是否包含在某个内存区域中。这类操作非常频繁，为了方便执行这类对内存区域的操作，内核定义了许多的辅助函数。它们都声明在文件<linux/mm.h>中。
+
+### 操作内存区域
+
+find_vma()函数：找到给定的内存地址属于哪一个内存区域。定义在<mmap.c>中。该函数在指定的地址空间中搜索第一个vm_end大于addr的内存区域。换句话说，该函数寻找第一个包含addr或首地址大于addr的内存区域，如果没有发现这样的区域，该函数返回NULL；否则返回指向匹配的内存区域的vm_area_struct结构体指针。注意，由于返回的VMA首地址可能大于addr，所以指定的地址并不一定就包含在返回的VMA中。因为很有可能在对某个VMA执行操作后，还有其他更多的操作会对该VMA接着进行操作，所以find_vma()函数返回的结果披缓存在内存描述符的mmap-cache域中。（先搜索缓存，因此结果可能不正确）
+
+find_vma_prev() 返回第一个小于addr的VMA。
+
+### mmap()和do_mmap()：创建地址区间
+
+内核使用do_mmap()函数创建一个新的线性地址区间。但是说该函数创建了一个新VMA井不非常谁确，因为如果创建的地址区间和一个已经存在的地址区间相邻，并且它们具有相同的访问权限的话，两个区间将合并为一个。如果不能合并，就确实需要创建一个新的VMA了。但无论哪种情况，do_mmap()函数都会将一个地址区间加入到进程的地址空间中——无论是扩展已存在的内存区域还是创建一个新的区域。函数定义在文件<linux/mm.h>中。
+
+```c
+static inline unsigned long do_mmap(struct file *file, unsigned long addr,
+	unsigned long len, unsigned long prot,
+	unsigned long flag, unsigned long offset)
+```
+
+该函数映射由file指定的文件，具体映射的是文件中从偏移offset处开始，长度为len字节的范围内的数据。如果fi1e参数是NULL并且offset参数也是0，那么就代表这次映射没有和文件相关，该情况称作匿名映射（anonymous mapping）。如果指定了文件名和偏移量，那么该映射称为文件映射（file-backed mapping）。
+
+addr是可选参数，它指定搜索空闲区域的起始位置。
+
+prot参数指定内存区域中页面的访问权限。访问权限标志定义在<asm/mman.h>中。
+
+| 标志         | 权限         |
+| ---------- | ---------- |
+| PROT_READ  | 对应于VM_READ |
+| PROT_WRITE | VM_WRITE   |
+| PROT_EXEC  | VM_EXEC    |
+| PROT_NONE  | 页不可被访问     |
+
+flag指定了VMA标志，指定类型并改变映射的行为。
+
+如果系统调用do_map()的参数中有无效参数，那么它返回一个负值；否则，它会在虚拟内存中分配一个合适的新内存区域。如果有可能的话，将新区域和邻近区域进行合并，否则内核从vm_area_chchep长字节slab缓存中分配一个vm_area_struct结构体，并使用vma_link()函数将新分配的内存区域添加到地址空间的内存区域链表和红——黑树中，随后还要更新内存描述符中的total_vm域，然后才返回新分配的地址区间的初始地址。
+
+通过mmap()族函数系统调用获取内核函数do_mmap()的功能。
+
+### mummap()和do_mummap()：删除地址区间
+
+do_mummap()从特定的进程地址空间中删除指定地址区间，定义在<linux/mm.h>中。
+
+```c
+int do_munmap(struct mm_struct *, unsigned long, size_t);
+```
+
+第一个参数指向要删除区域所在的地址空间，删除从第二个参数开始，长度为第三个参数的地址区间。系统调用在<mm/mmap.c>中。sys_munmap()。
+
+### 页表
+
+
+
 ## A：第16章 页高速缓存和页回写
+
+暂略
 
 ## B：第2章 内存寻址
 
