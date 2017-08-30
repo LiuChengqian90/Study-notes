@@ -1047,7 +1047,11 @@ Linux中使用三级页表完成地址转换。利用多级页表能够节约地
 
 #### 段选择符和段寄存器
 
-一个逻辑地址由两部分组成：段标识符和指定段内相对地址的偏移量。段标识符是一个16位长的字段，称为段选择符（Segment Selector），而偏移量是一个32位长的字段。![段选择符.jpg](https://github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/%E6%AE%B5%E9%80%89%E6%8B%A9%E7%AC%A6.jpg?raw=true)
+一个逻辑地址由两部分组成：段标识符和指定段内相对地址的偏移量。段标识符是一个16位长的字段，称为段选择符（Segment Selector），而偏移量是一个32位长的字段。
+
+
+
+![段选择符.jpg](https://github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/%E6%AE%B5%E9%80%89%E6%8B%A9%E7%AC%A6.jpg?raw=true)
 
 为了快速方便地找到段选择符，处理器提供段寄存器，段寄存器的唯一目的是存放段选择符。这些段寄存器称为cs,  ss, ds, es,  fs和gs。尽管只有6个段寄存器，但程序可以把同一个段寄存器用于不同的目的，方法是先将其值保存在内存中，用完后再恢复。
 6个寄存器中3个有专门的用途:
