@@ -1045,6 +1045,8 @@ Linux中使用三级页表完成地址转换。利用多级页表能够节约地
 
 从80256模型开始，Intel微处理器以两种不同的方式执行地址转换：实模式（real mode）和保护模式（protected mode）。实模式存在的主要原因是要维持处理器与早期模型兼容，并让操作系统自举。
 
+#### 段选择符和段寄存器
+
 一个逻辑地址由两部分组成：段标识符和指定段内相对地址的偏移量。段标识符是一个16位长的字段，称为段选择符（Segment Selector），而偏移量是一个32位长的字段。![段选择符.jpg](https://github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/%E6%AE%B5%E9%80%89%E6%8B%A9%E7%AC%A6.jpg?raw=true)
 
 为了快速方便地找到段选择符，处理器提供段寄存器，段寄存器的唯一目的是存放段选择符。这些段寄存器称为cs,  ss, ds, es,  fs和gs。尽管只有6个段寄存器，但程序可以把同一个段寄存器用于不同的目的，方法是先将其值保存在内存中，用完后再恢复。
@@ -1054,6 +1056,8 @@ ss	栈段寄存器，指向包含当前程序栈的段。
 ds	数据段寄存器，指向包含静态数据或者全局数据段。
 其他3个段寄存器作一般用途，司一以指向任意的数据段。
 cs寄存器还有一个很重要的功能:它含有一个两位的字段，用以指明CPU的当前特权级(Current Privilege Level, CPL)。值为0代表最高优先级，而值为3代表最低优先级。Linux只用0级和3级，分别称之为内核态和用户态。
+
+#### 段描述符
 
 每个段由一个8字节的段描述符（Segment Descriptor）表示，它描述了段的特征。段描述符放在全局描述符表（Global Descriptor Table, GDT）或局部描述符表（Local Descriptor Table, LDT）中。
 
@@ -1091,6 +1095,8 @@ cs寄存器还有一个很重要的功能:它含有一个两位的字段，用�
 | TI    | TI（Table Indicator）标志，指明段描述符是在GDT中（TI=0）或在LDT中（TI=1） |
 | RPL   | 请求者特权级，当相应的段选择符装入到cs寄存器中时指示出CPU当前的特权级，它还可以用于在访问数据段时有选择地削弱处理器的特权级 |
 
+#### 快速访问段描述符
+
 重申：逻辑地址由16位段选择符和32位偏移量组成，段寄存器仅仅存放段选择符。
 
 为了加速逻辑地址到线性地址的转换，80x86处理器提供一种附加的非编程的寄存器（不能被编程者设置的寄存器），供6个可编程的段寄存器使用。每一个非编程的寄存器含有8个字节的段描述符，由相应的段寄存器中的段选择符来指定。每当一个段选择符被装入段寄存器时，相应的段描述符就由内存装入到对应的非编程CPU寄存器。之后，针对那个段的逻辑地址转换就可以不访问主存中的GDT或LDT，处理器只需直接引用存放段描述符的CPU寄存器即可。仅当段寄存器的内容改变时，才有必要访问GDT或LDT。
@@ -1101,7 +1107,9 @@ cs寄存器还有一个很重要的功能:它含有一个两位的字段，用�
 
 GDT的第一项总是设为0。这就确保空段选择符的逻辑地址会被认为是无效的，因此引起一个处理器异常。能够保存在GDT中的段描述符的最大数目是8191，即2^13^ - 1。
 
- 下图显示一个逻辑地址转换的详细过程，分段单元（segmentation unit）执行以下操作：
+#### 分段单元
+
+下图显示一个逻辑地址转换的详细过程，分段单元（segmentation unit）执行以下操作：
 
 - 先检查段选择符的TI字段，以决定段描述符保存在哪一个描述符表中。GDT中，分段单元从gdtr寄存器得到GDT的线性基地址；LDT中，分段单元从ldtr寄存器得到LDT的线性基地址。
 - 从段选择符的index字段计算段描述符的地址，index字段的值乘以8（一个段描述符的大小，index << 3），这个结果与gdtr或ldtr寄存器中的内容相加。
@@ -1143,6 +1151,8 @@ GDT的第一项总是设为0。这就确保空段选择符的逻辑地址会被�
 
 如前所述，CPU的当前特权级(CPL)反映了进程是在用户态还是内核态，并由存放在cs寄存器中的段选择符的RPL字段指定。只要当前特权级被改变，一些段寄存器必须相应地更新。例如，当CPL=3时(用户态)，ds寄存器必须含有用户数据段的段选择符，而当CPL=0时，ds寄存器必须含有内核数据段的段选择符。
 
+#### Linux GDT
+
 在单处理器系统中只有一个GDT，而在多处理器系统中每个CPU对应一个GDT。所有的GDT都存放在cpu_gdt_table数组中，而所有GDT的地址和它们的大小(当初始化gdtr寄存器时使用)被存放在cpu_gdt_descr数组中。如果你到源代码索引中查看，可以看到这些符号都在文件arch/i386/kernel/head.S中被定义。
 
 下图是GDT的布局示意图。每个GDT包含18个段描述符和14个空的，未使用的，或保留的项。插入未使用的项的目的是为了使经常一起访问的描述符能够处于同一个32字节的硬件高速缓存行中。
@@ -1165,6 +1175,8 @@ GDT的第一项总是设为0。这就确保空段选择符的逻辑地址会被�
 - GDT中只有少数项可能依赖于CPU正在执行的进程（LDT和TLS段描述符）。
 - 在某些情况下，处理器可能临时修改GDT副本里的某个项，例如，当调用APM的BIOS例程时就会发生这种情况。
 
+#### Linux LDT
+
 大多数用户态下的Linux程序不使用局部描述符表，这样内核就定义了一个缺省的LDT供大多数进程共享。缺省的局部描述符表存放在default_ldt数组中。它包含5个项，但内核仅仅有效地使用了其中的两个项：用于iBCS执行文件的调用门和Solaris/x86可执行文件的调用门。调用门是80x86微处理器提供的一种机制，用于在调用预定义函数时改变CPU的特权级（参考Intel文档以获取更多详情）。
 
 在某些情况下，进程仍然需要创建自己的LDT，像Wine那样的程序，它们执行面向段的微软Windows应用程序。modify_ldt()系统调用允许进程创建自己的LDT。任何被modify_ldt()创建的自定义局部描述符表仍然需要它自己的段。当处理器开始执行拥有自定义局部描述符表的进程时，该CPU的GDT副本中的LDT表项相应地就被修改了。
@@ -1182,6 +1194,8 @@ GDT的第一项总是设为0。这就确保空段选择符的逻辑地址会被�
 把线性地址映射到物理地址的数据结构称为页表(page table )。页表存放在主存中，并在启用分页单元之前必须由内核对页表进行适当的初始化。
 
 从80386开始，所有的80x86处理器都支持分页，它通过设置cr0寄存器的PG标志启用。当PG=0时，线性地址就被解释成物理地址。
+
+#### 常规分页
 
 从80386起，Intel处理器的分页单元处理4KB的页。32位的线性地址被分成3个域：
 
@@ -1215,6 +1229,8 @@ Directory字段和Table字段都是10位长，因此页目录和页表都可以�
 | Page Size标志       | 只应用于页目录项。置为1，则页目录指的是2MB或4MB的页框。          |
 | Global标志          | 只应用于页表项。这个标志是在Pentium Pro中引入的，用来防止常用页从TLB（俗称“快表”）高速缓存中刷新出去。只有在cr4寄存器的页全局启用（Page Global Enable, PGE）标志置位时这个标志才起作用。 |
 
+#### 扩展分页
+
 从Pentium模型开始，80x86微处理器引入了扩展分页（extended paeging），它允许页框大小为4MB而不是4KB。扩展分页用于把大段连续的线性地址转换成相应的物理地址，在这些情况下，内核可以不用中间页表进行地址转换，从而节省内存并保留TLB项。
 
 通过设置页目录项的Page Size标志启用扩展分页功能。分页单元吧32位线性地址分成两个字段：
@@ -1229,11 +1245,13 @@ Directory字段和Table字段都是10位长，因此页目录和页表都可以�
 
 通过设置cr4处理器寄存器的PSE标志能使扩展分页与常规分页共存。
 
+#### 硬件保护方案
+
 分页单元和分段单元的保护方案不同。尽管x86处理器允许一个段使用4种可能的特权级别，但与页和页表相关的特权级只有两个，因为特权由User/Supervisor标志所控制。若这个标志为0，只有当CPL小于3(这意味着对于Linux而言，处理器处于内核态)时才能对页寻址。若该标志为1，则总能对页寻址。
 
 此外，与段的3中存取权限（读、写、执行）不同的是，页的存取权限只有两种（度、写）。如果页目录项或页表项的Read/Write标志等于0，说明相应的页表或页是只读的，否则是可读写的。
 
-常规分页举例：
+#### 常规分页举例
 
 假定内核已给一个正在允许的进程分配的线性地址空间范围是0x2000 0000 到 0x2003 ffff。这个空间正好由64页组成。从分配给进程的线性地址的最高10位（Directory字段）开始。这两个地址都以2开头后面跟着0，因此高10位有相同的值，即0x080或十进制128。因此，这两个地址的Directory字段都指向进程页目录的第129项。相应的目录项中必须包含分配给该进程的页表的物理地址。如果没有给这个进程分配其他的线性地址，则页目录的其余1023项都填为0.
 
@@ -1246,6 +1264,8 @@ Directory字段和Table字段都是10位长，因此页目录和页表都可以�
 3. 最后，Offset字段0x406用于在目标页框中读偏移量为0x406中的字节。
 
 如果页表第0x21表项的Present标志为0，则此页就不在主存中，这种情况下，分页单元在线性地址转换的同时产生一个缺页异常。无论何时，当进程试图访问限定在0x2000 0000 到 0x2003 ffff范围之外的线性地址时，都将产生一个缺页异常，因为这些页表项都填充了0，尤其是它们的Present标志都被清0。
+
+#### 物理地址扩展（PAE）分页机制
 
 处理器所支持的RAM容量受连接到地址总线上的地址管脚数限制。早期Intel处理器从80386到Pentium使用32位物理地址。从理论上讲，这样的系统上可以安装高达4GB的RAM；而实际上，由于用户进程线性地址空间的需要，内核不能直接对1GB以上的RAM进行寻址，我们将会在后而"Linux中的分页”一节中看到这一点。
 
@@ -1273,6 +1293,8 @@ Directory字段和Table字段都是10位长，因此页目录和页表都可以�
 
 总之，一旦cr3被设置，就可能寻址高达4GB RAM。如果我们希望对更多的RAM寻址，就必须在cr3中放置一个新值，或改变PDPT的内容。然而，使用PAE的主要问题是线性地址仍然是32位长。这就迫使内核编程人员用同一线性地址映射不同的RAM区。很明显，PAE并没有扩大进程的线性地址空间，因为它只处理物理地址。此外，只有内核能够修改进程的页表，所以在用户态下运行的进程不能使用大于4GB的物理地址空间。另一方面，PAE允许内核使用容量高达64GB的RAM，从而显著增加了系统中的进程数量。
 
+#### 64位系统中的分页
+
 32位微处理器普遍采用两级分页。然而两级分页并不适用于采用64位系统的计算机。让我们用一种思维实验来解释为什么：首先假设一个大小为4KB的标淮页。因为1KB覆盖2^10^个地址的范围，4KB覆盖2^12^个地址，所以offset字段是12位。这样线性地址就剩下52位分配给Table和Directory字段。如果我们现在决定仅仅使用64位中的48位来寻址(这个限制仍然使我们自在地拥有256TB的寻址空间！)，剩下的48-12=36位将被分配给Table和Directory字段。如果我们现在决定为两个字段各预留18位，那么每个进程的页目录和页表都含有2^18^个项，即超过256000个项。
 
 由于这个原因，所有64位处理器的硬件分页系统都使用了额外的分页级别。使用的级别数量取决于处理器的类型。
@@ -1284,6 +1306,8 @@ Directory字段和Table字段都是10位长，因此页目录和页表都可以�
 | ppc64  | 4KB  | 41      | 3     | 10+10+9+12  |
 | sh64   | 4KB  | 41      | 3     | 10+10+9+12  |
 | x86_64 | 4KB  | 48      | 4     | 9+9+9+9+12  |
+
+#### 硬件高速缓存
 
 当今的微处理器时钟频率接近几个GHz，而动态RAM（DRAM）芯片的存取时间是时钟周期的数百倍。这意味着，当从RAM中取操作数或向RAM中存放结果这样的指令执行时，CPU可能等待很长时间。
 
@@ -1307,6 +1331,8 @@ Directory字段和Table字段都是10位长，因此页目录和页表都可以�
 处理器的cr0寄存器的CD标志位用来启用或禁用高速缓存电路。这个寄存器中的NW标志指明高速缓存是使用通写还是回写策略。
 
 Pentium处理器高速缓存的另一个有趣的特点是，让操作系统把不同的高速缓存管理策略与每一个页框相关联。为此，每一个页目录项和每一个页表项都包含两个标志：PCD(Page Cache Disablt)标志指明当访问包含在这个页框中的数据时，高速缓存功能必须被启用还是禁用。PWT(page Write-Through)标志指明当把数据写到页框时，必须使用的策略是回写策略还是通写策略。Linux清除了所有页目录项和页表项中的PCD和PWT标志;结果是：对于所有的页框都启用高速缓存，对于写操作总是采用回写策略。
+
+#### 转换后援缓冲器（TLB）
 
 除了通用硬件商速缓存之外，x86处理器还包含了另一个称为转换后援缓冲器或TLB(Translation Lookaside Buffer)的高速缓存用于加快线性地址的转换。当一个线性地址被第一次使用时，通过慢速访问RAM中的页表计算出相应的物理地址。同时，物理地址被存放在一个TLB表项(TLB entry)中，以便以后对同一个线性地址的引用可以快速地得到转换。
 
@@ -1342,13 +1368,19 @@ Linux的进程处理很大程度上依赖于分页。事实上，线性地址到
 
 把线性地址映射到物理地址虽然有点复杂，但现在已经成了一种机械式的任务。下面会列举一些函数和宏，它们检索内核为了查找地址和管理表格所需的信息；其中大多数函数只有一两行。
 
+#### 线性地址字段
+
+下列宏简化了页表处理。
+
 | 宏名                                       | 描述                                       |
 | ---------------------------------------- | ---------------------------------------- |
 | PAGE_SHIFT                               | 指定Offset字段的位数；当用于x86处理器时，它产生的值为12。由于页内所有地址都必须能放到Offset字段中，因此x86系统的页的大小是2^12^=4096字节。 |
 | PMD_SHIFT                                | 指定线性地址的Offset字段和Table字段的总位数。换句话说，是页中间目录项可以映射的区域大小的对数。PMD_SIZE宏用于计算由页中间目录的一个单独表项所映射的区域大小，也就是一个页表的大小。PMD_MASK宏用于屏蔽Offset字段与Table字段的所有位。当PAE被禁用时，PMD_SHIFT产生的值为22(来自Offset的12位加上来自Table的10位)，PMD_SIZE产生的值为2^22^或4 MB , PMD_MASK产生的值为0xffc000000相反，当PAE被激活时，PMD_SHIFT产生的值为21(来自Offset的12位加上来自Table的9位)，PMD_SIZE产生的值为2^21^或2 MB,  PMD_MASK产生的值为Oxffe00000。大型页不使用最后一级页表，所以产生大型页尺寸的LARGE_PAGE_SIZE宏等于PMD_SIZE(2PMD_SHIFT)，而在大型页地址中用于屏蔽Offset字段和Table字段的所有位的LARGE_PAGE_MASK宏，就等于PMD_MASK。 |
 | PUD_SHIFT                                | 确定页上级目录项能映射的区域大小的对数。PUD_SIZE宏用于计算页全局目录中的一个单独表项所能映射的区域大小。PUD_ MASK宏用于屏蔽Offset字段、Table字段、Middle Air字段和Upper Air字段的所有位。在x86处理器上，PUD_SHIFT总是等价于PMD_SHIFT，而PUD_SIZE则等于4MB或2MB。 |
 | PGDIR_SHIFT                              | 确定页全局目录项能映射的区域大小的对数。PGDIR_SIZE宏用于计算页全局目录中一个单独表项所能映射区域的大小。PGDIR_MASK宏用于屏蔽Offset, Table, Middle Air及Upper Air字段的所有位。当PAE被禁止时，PGDIR_SHIFT产生的值为22(与PMD-SHIFT和PUD_SHIFT产生的值相同)，PGDIR_SIZE产生的值为2^22^或4MB，以及PGDIR_MASK产生的值为Oxffc00000。相反，当PAE被激活时，PGDIR_SHIFT产生的值为30(12位Offset加9位Table再加9位Middle Air)，PGD工R_S工ZE产生的值为2^30^或1 GB以及PGDIR_ MASK产生的值为Oxc0000000。 |
-| PTRS_PER_PTE  PTRS_PER_PMD  PTRS_PER_PUD  PTRS_PER_PGD | 用于计算页表、页中间目录、页上级目录和页全局目录表中表项的个数。当PAE被禁止时，它们产生的值分别为1024,1,1和1024。当PAE被激活时，产生的值分别为512,512,1和4。 |
+| PTRS_PER_PTE  PTRS_PER_PMD PTRS_PER_PUD PTRS_PER_PGD | 用于计算页表、页中间目录、页上级目录和页全局目录表中表项的个数。当PAE被禁止时，它们产生的值分别为1024,1,1和1024。当PAE被激活时，产生的值分别为512,512,1和4。 |
+
+#### 页表处理
 
 pte_t, pmd_t, pud_t和pgd_t分别描述页表项、页中间目录项、页上级目录和页
 全局目录项的格式。当PAE被激活时它们都是64位的数据类型，否则都是32位数据类型。pgprot_t是另一个64位(PAE激活时)或32位(PAE禁用时)的数据类型，它表示与一个单独表项相关的保护标志。
@@ -1446,7 +1478,9 @@ pte_t, pmd_t, pud_t和pgd_t分别描述页表项、页中间目录项、页上�
 | pte_free_kernel(pte)            | 等价于pte_free()，但由主内核页表使用                  |
 | clear_page_range(mmu,start,end) | 从线性地址start到end通过反复释放页表和清除页中间目录项来清除进程页表的内容 |
 
-物理内存在初始化阶段，内核必须建立一个物理地址映射来指定哪些物理地址范围对内核可用而哪些不可用。
+#### 物理内存布局
+
+在初始化阶段，内核必须建立一个物理地址映射来指定哪些物理地址范围对内核可用而哪些不可用。
 
 内核将下列页框记为保留：
 
@@ -1481,7 +1515,327 @@ pte_t, pmd_t, pud_t和pgd_t分别描述页表项、页中间目录项、页上�
 
 内核可能不会见到BIOS报告的所有物理内存:例如，如果未使用PAE支持来编译，即使有更大的物理内存可供使用，内核也只能寻址4GB大小的RAM。setup_memory()函数在machine_specific memory_setup()执行后被调用:它分析物理内存区域表并初始化一些变量来描述内核的物理内存布局，这些变量如下表所示。
 
+| 变量名称            | 说明                        |
+| --------------- | ------------------------- |
+| num_physpages   | 最高可用页框的页框号                |
+| totalram_pages  | 可用页框的总数量                  |
+| min_low_pfn     | RAM中在内核映像后第一个可用页框的页框号     |
+| max_pfn         | 最后一个可用页框的页框号              |
+| max_low_pfn     | 被内核直接映射的最后一个页框的页框号（低地址内存） |
+| totalhigh_pages | 内核非直接映射的页框总数（高地址内存）       |
+| highstart_pfn   | 内核非直接映射的第一个页框的页框号         |
+| highend_pfn     | 内核非直接映射的最后一个页框的页框号        |
 
+为了避免把内核装入一组不连续的页框里，Linux更愿跳过RAM的第一个MB。明确地说，Linux用PC体系结构未保留的页框来动态存放所分配的页。下图显示了Linux怎样填充前3MB的RAM：
+
+![Linux2.6的前768个页框（3MB）.jpg](https://github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/Linux2.6%E7%9A%84%E5%89%8D768%E4%B8%AA%E9%A1%B5%E6%A1%86%EF%BC%883MB%EF%BC%89.jpg?raw=true)
+
+符号\_text对应于物理地址0x0010 0000，表示内核代码第一个字节的地址。内核代码的结束位代由另外一个类似的符号\_etext表示。内核数据分为两组：初始化过的数据的和没有初始化的数据。初始化过的数据在\_etext后开始，在\_edata处结束。紧接着是未初始化的数据并以\_end结束。
+
+图中出现的符号并没有在Linux源代码中定义，它们是编译内核时产生的（可以在System.map文件中找到这些符号，System.map是编译内核以后所创建的）。
+
+#### 进程页表
+
+进程的线性地址空间分成两部分：
+
+- 从0x0000 0000——0xbfff ffff的线性地址，无论进程运行在用户态还是内核态都可以寻址（0—3GB）。
+- 从0xc000 0000——0xffff ffff的线性地址，只有内核的进程才能寻址。
+
+进程运行在用户态时，所产生的线性地址小于0xc000 0000，而运行在内核态时，执行内核代码，所产生的地址大于等于0xc000 0000。但是，在某些情况下，内核为了检索或存放数据必须访问用户态线性地址空间。
+
+宏PAGE_OFFSET产生的值是0xc000 0000，这就是进程在线性地址空间中的偏移量，也是内核生存空间的开始之处。
+
+页全局目录的第一部分表项映射的线性地址小于0xc000 0000(在PAE未启用时是前768项，PAE启用时是前3项)，具体大小依赖于特定进程。相反，剩余的表项对所有进程来说都应该是相同的，它们等于主内核页全局目录的相应表项。
+
+#### 内核页表
+
+内核维持着一组自己使用的页表，驻留在所谓的主内核页全局目录(master kernel Page Global Directory)中。系统初始化后，这组页表还从未被任何进程或任何内核线程直接使用;更确切地说，主内核页全局目录的最高目录项部分作为参考模型，为系统中每个普通进程对应的页全局目录项提供参考模型。
+
+内核初始化自己的页表，这个过程分为两个阶段。事实上，内核映像刚刚被装入内存后，CPU仍然运行于实模式，所以分页功能没有被启用。
+
+第一个阶段，内核创建一个有限的地址空间，包括内核的代码段和数据段、初始页表和用于存放动态数据结构的共128KB大小的空间。这个最小限度的地址空间仅够将内核装入RAM和对其初始化的核心数据结构。
+
+第二个阶段，内核充分利用剩余的RAM并适当地建立分页表。下一节解释这个方案是怎样实施的。
+
+#### 临时内核页表
+
+临时页全局目录是在内核编译过程中静态地初始化的，而临时页表是由startup_32()汇编语言函数(定义于arch/i386/kernel/head.S)初始化的。我们不再过多提及页上级目录和页中间目录，因为它们相当于页全局目录项。在这个阶段PAE支持并未激活。
+
+临时页全局目录放在swapper_pg_dir变量中。临时页表在pg0变量处开始存放，紧接在内核未初始化的数据段(_end符号)后面。为简单起见，我们假设内核使用的段、临时页表和128KB的内存范围能容纳于RAM前8MB空间里。为了映射RAM前8MB的空间，需要用到两个页表。
+
+分页第一个阶段的目标是允许在实模式下和保护模式下都能很容易地对这8MB寻址。因此，内核必须创建一个映射，把从0x0000 0000到0x007f ffff的线性地址和从0xc000 0000到0xc07f ffff的线性地址映射到从0x0000 0000到0x007f ffff的物理地址。换句话说，内核在初始化的第一阶段，可以通过与物理地址相同的线性地址或者通过从0xc000 0000开始的8MB线性地址对RAM的前8MB进行寻址。
+
+内核通过把swapper_pg_dir所有项都填充为0来创建期望的映射，不过，0、1、0x300(十进制768)和0x301(十进制769)这四项除外。后两项包含了从0xc000 0000到0xc07f ffff间的所有线性地址。0、1、0x300和0x301按以下方式初始化：
+
+- 0项和0x300项的地址字段置为pg0的物理地址，而1项和0x301项的地址字段 置为紧随pg0后的页框的物理地址。
+- 把这四个项中的Present、Read/Write和User/Supervisor标志置位。
+- 把这四个项中的Accessed、Dirty、PCD、PWD和Page Size标志清0。
+
+汇编语言函数startup_32()也启用分页单元，通过向cr3控制寄存器装入swapper_pg_dir的地址及设置cr0控制寄存器的PG标志来达到这一目的。下面是等价的代码片段：
+
+```c
+movl $swapper_pg_dir-Oxc0000000,%eax
+movl %eax,%cr3		/*设置页表指针*/
+movl %cr0,%eax
+orl $0x80000000,%eax
+movl %eax,%cr0		/*设置分页(PG)位“/
+```
+
+#### 当RAM小于896MB时的最终内核页表
+
+由内核页表所提供的最终映射必须把从0xc0000000开始的线性地址转化为从0开始的物理地址。
+
+宏\_\_pa用于把从PAGE_OFFSET开始的线性地址转换成相应的物理地址，而宏\_\_va做相反的转化。
+
+主内核页全局目录仍然保存在swapper_pg_dir变量中。它由paging_init()函数
+初始化。该函数进行如下操作：
+
+1. 调用pagetable_init()适当地建立页表项。
+2. 把swapper_pg_dir的物理地址写入cr3控制寄存器中。
+3. 如果CPU支持PAE并且如果内核编译时支持PAE，则将cr4控制寄存器的PAE标志置位。
+4. 调用\_\_flush_tlb_all()使TLB的所有项无效。
+
+pagetable_init()执行的操作既依赖于现有RAM的容量，也依赖于CPU模型。让我们从最简单的情况开始。我们的计算机有小于896MB(1024-128,128MB留给其他映射)的RAM, 32位物理地址足以对所有可用RAM进行寻址，因而没有必要激活PAE机制。
+swapper_pg_dir页全局目录由如下等价的循环重新初始化：
+
+```c
+pgd = swapper_pg_dir + pgd_index(PAGE_OFFSET);	/*768*/
+phys_addr = 0x00000000;
+while(phys_addr < (max_low_pfn * PAGE_SIZE))
+{
+    pmd = one_md_table_init(pgd);	/*返回pgd*/
+  	set_pmd(pmd, __pmd(phys_addr | pgprot_val(__pgprot(ox1e3))));
+  /*0x1e3 == Present,Accessed,Dirty,Read/Write,Page Size,Global*/
+  	phys_addr += PTRS_PER_PTE * PAGE_SIZE;	/*0X400000*/
+  	++pgd;
+}
+```
+
+我们假定CPU是支持4MB页和“全局(global)" TLB表项的最新x86微处理器。注意如果页全局目录项对应的是Oxc0000000之上的线性地址，则把所有这些项的User/Supervisor标志清0，由此拒绝用户态进程访问内核地址空间。还要注意Page Size被置位使得内核可以通过使用大型页来对RAM进行寻址(“扩展分页”)。
+
+由startup_32()函数创建的物理内存前8MB的恒等映射用来完成内核的初始化阶段。当这种映射不再必要时，内核调用zap_low_mappings()函数清除对应的页表项。
+
+实际上，这种描述并未说明全部事实。我们将在后面“固定映射的线性地址”一节看到，内核也调整与“固定映射的线性地址”对应的页表项。
+
+#### 当RAM大小在896MB—4096MB时的最终内核页表
+
+在这种情况下，并不把RAM全部映射到内核地址空间。Linux在初始化阶段可以做的最好的事是把一个具有896MB的RAM窗口(window)映射到内核线性地址空间。如果一个程序需要对现有RAM的其余部分寻址，那就必须把某些其他的线性地址间隔映射到所需的RAM。这意味着修改某些页表项的值。将在以后（L-B：第八章 内存管理）讨论这种动态重映射是如何进行的。
+
+内核使用与前一种情况相同的代码来初始化页全局目录。
+
+#### 当RAM大于4096MB时的最终内核页表
+
+现在考虑RAM大于4GB计算机的内核页表初始化;更确切地说，处理以下发生的情况：
+
+- CPU模型支持物理地址扩展(PAE)
+- RAM容量大于4GB
+- 内核以PAE支持来编译
+
+尽管PAE处理36位物理地址，但是线性地址依然是32位地址。如前所述，Linux映射一个896MB的RAM窗口到内核线性地址空间，剩余RAM留着不映射，并由动态重映射来处理，（L-B：第八章 内存管理）将对此进行描述。与前一种情况的主要差异是使用三级分页模型，因此页全局目录按以下循环代码来初始化：
+
+```c
+pgd_idx = pgd_index(PAGE_OFFSET);	/* 3 */
+for(i = 0; i < pgd_idx; i++)
+    set_pgd(swapper_pg_dir + i, __pgd(__pa(empty_zero_page) + 0x001));		/* 0x001 == Present */
+pgd = swapper_pg_dir + pgd_idx;
+phys_addr = 0x00000000;
+for(; i < PTRS_PER_PGD; ++i, ++pgd)
+{
+    pmd = (pmd_t *)alloc_bootmem_low_pages(PAGE_SIZE);
+  	set_pgd(pgd, __pgd(__pa(pmd) | 0x001));
+  	if(phys_addr < max_low_pfn * PAGE_SIZE)
+      	for(j = 0; j < PTRS_PER_PMD && phys_addr < max_low_pfn * PAGE_SIZE; ++j)
+        {
+            set_pmd(pmd, __pmd(phys_addr | pgprot_val(__pgprot(0x1e3))));
+          	/*0x1e3 == Present,Accessed,Dirty,Read/Write,Page Size,Global*/
+            phys_addr += PTRS_PER_PTE * PAGE_SIZE;	/* 0x200000 */
+        }
+}
+swapper_pg_dir[0] = swapper_pg_dir(pgd_idx);
+```
+
+页全局目录中的前三项与用户线性地址空间相对应，内核用一个空页(empty_zeropage)的地址对这三项进行初始化。第四项用页中间目录(pmd)的地址初始化，该页中间目录是通过调用alloc_bootmem_low_pages()分配的。页中间目录中的前448项(有512项，但后64项留给非连续内存分配)用RAM前896MB的物理地址填充。
+
+注意，支持PAE的所有CPU模型也支持大型2MB页和全局页。正如前一种情况一样，只要可能，Linux使用大型页来减少页表数。
+
+然后页全局目录的第四项被拷贝到第一项中，这样好为线性地址空间的前896MB中的低物理内存映射作镜像。为了完成对SMP系统的初始化，这个映射是必需的:当这个映射不再必要时，内核通过调用zap_low_mappings()函数来清除对应的页表项，正如先前的情况一样。
+
+#### 固定映射的线性地址
+
+内核线性地址第四个GB的初始部分映射系统的物理内存。但是，至少128MB的线性地址总是留作他用，因为内核使用这些线性地址实现非连续性内存分配和固定映射的线性地址。
+
+非连续内存分配仅仅是动态分配和释放内存页的一种特殊方式。
+
+固定映射的线性地址（fix-mapped linear address）基本上是一种类似于0xffff c000这样的常量线性地址，其对应的物理地址不必等于线性地址减去0xc000 0000，而是可以以任意方式建立。因此，每个固定映射的线性地址都映射一个物理内存的页框。之后会看到，内核使用固定映射的线性地址来代替指针变量，因为这些指针变量的值从不改变。
+
+固定映射的线性地址概念上类似于对RAM前896MB映射的线性地址。不过，固定映射的线性地址可以映射任何物理地址，而由第4GB初始部分的线性地址所建立的映射是线性的（线性地址X 映射物理地址X-PAGE_OFFSET）。
+就指针变量而言，固定映射的线性地址更有效。事实上，间接引用一个指针变量比间接引用一个立即常量地址要多一次内存访问。此外，在间接引用一个指针变量之前对其值进行检查是一个良好的编程习惯；相反，对一个常量线性地址的检查则是没有必要的。
+
+每个固定映射的线性地址都由定义于enum fixed_addresses的数据结构中的整型索引来表示：
+
+```c
+enum fixed_addresses {
+#ifdef CONFIG_X86_32
+	FIX_HOLE,
+	FIX_VDSO,
+#else
+	VSYSCALL_LAST_PAGE,
+	VSYSCALL_FIRST_PAGE = VSYSCALL_LAST_PAGE
+			    + ((VSYSCALL_END-VSYSCALL_START) >> PAGE_SHIFT) - 1,
+	VSYSCALL_HPET,
+#endif
+	FIX_DBGP_BASE,
+	FIX_EARLYCON_MEM_BASE,
+#ifdef CONFIG_PROVIDE_OHCI1394_DMA_INIT
+	FIX_OHCI1394_BASE,
+#endif
+#ifdef CONFIG_X86_LOCAL_APIC
+	FIX_APIC_BASE,	/* local (CPU) APIC) -- required for SMP or not */
+#endif
+#ifdef CONFIG_X86_IO_APIC
+	FIX_IO_APIC_BASE_0,
+	FIX_IO_APIC_BASE_END = FIX_IO_APIC_BASE_0 + MAX_IO_APICS - 1,
+#endif
+#ifdef CONFIG_X86_VISWS_APIC
+	FIX_CO_CPU,	/* Cobalt timer */
+	FIX_CO_APIC,	/* Cobalt APIC Redirection Table */
+	FIX_LI_PCIA,	/* Lithium PCI Bridge A */
+	FIX_LI_PCIB,	/* Lithium PCI Bridge B */
+#endif
+#ifdef CONFIG_X86_F00F_BUG
+	FIX_F00F_IDT,	/* Virtual mapping for IDT */
+#endif
+#ifdef CONFIG_X86_CYCLONE_TIMER
+	FIX_CYCLONE_TIMER, /*cyclone timer register*/
+#endif
+#ifdef CONFIG_X86_32
+	FIX_KMAP_BEGIN,	/* reserved pte's for temporary kernel mappings */
+	FIX_KMAP_END = FIX_KMAP_BEGIN+(KM_TYPE_NR*NR_CPUS)-1,
+#ifdef CONFIG_PCI_MMCONFIG
+	FIX_PCIE_MCFG,
+#endif
+#endif
+#ifdef CONFIG_PARAVIRT
+	FIX_PARAVIRT_BOOTMAP,
+#endif
+	FIX_TEXT_POKE1,	/* reserve 2 pages for text_poke() */
+	FIX_TEXT_POKE0, /* first page is last, because allocation is backward */
+	__end_of_permanent_fixed_addresses,
+	/*
+	 * 256 temporary boot-time mappings, used by early_ioremap(),
+	 * before ioremap() is functional.
+	 *
+	 * If necessary we round it up to the next 256 pages boundary so
+	 * that we can have a single pgd entry and a single pte table:
+	 */
+#define NR_FIX_BTMAPS		64
+#define FIX_BTMAPS_SLOTS	4
+#define TOTAL_FIX_BTMAPS	(NR_FIX_BTMAPS * FIX_BTMAPS_SLOTS)
+	FIX_BTMAP_END =
+	 (__end_of_permanent_fixed_addresses ^
+	  (__end_of_permanent_fixed_addresses + TOTAL_FIX_BTMAPS - 1)) &
+	 -PTRS_PER_PTE
+	 ? __end_of_permanent_fixed_addresses + TOTAL_FIX_BTMAPS -
+	   (__end_of_permanent_fixed_addresses & (TOTAL_FIX_BTMAPS - 1))
+	 : __end_of_permanent_fixed_addresses,
+	FIX_BTMAP_BEGIN = FIX_BTMAP_END + TOTAL_FIX_BTMAPS - 1,
+#ifdef CONFIG_X86_32
+	FIX_WP_TEST,
+#endif
+#ifdef CONFIG_INTEL_TXT
+	FIX_TBOOT_BASE,
+#endif
+	__end_of_fixed_addresses
+};
+```
+
+每个固定映射的线性地址都存放在线性地址第四个GB的末端。fix_to_virt()函数计算从给定索引开始的常量线性地址：
+
+```c
+static __always_inline unsigned long fix_to_virt(const unsigned int idx)
+{
+	/*
+	 * this branch gets completely eliminated after inlining,
+	 * except when someone tries to use fixaddr indices in an
+	 * illegal way. (such as mixing up address types or using
+	 * out-of-range indices).
+	 *
+	 * If it doesn't get removed, the linker will complain
+	 * loudly with a reasonably clear error message..
+	 */
+	if (idx >= __end_of_fixed_addresses)
+		__this_fixmap_does_not_exist();
+
+	return __fix_to_virt(idx);
+}
+```
+
+假定某个内核函数调用fix_to_virt(FIX_IO_APIC_BASE\_0)。因为该函数声明为"\_\_always_inline"，所以C编译程序不调用fix_to_virt()，而仅仅把它的代码插入到调用函数中。此外，运行时从不对这个索引值进行检查。事实上，FIX_IO_APIC_BASE_0是个等于3的常量，因此编译程序可以去掉if语句，因为它的条件在编译时为假。相反，如果条件为真，或者参数不是一个常量，则编译程序在连接阶段产生一个错误，因为符号__this_fixmap_does_not_exist在别处没有定义。最后，编译程序计算0xffff f000-(3 << PAGE_SHIFT)，并用常量线性地址0xfff c000代替fix_to_virt()函数调用。
+
+为了把一个物理地址与固定映射的线性地址关联起来，内核使用set_fixmap(idx,phys)和set_fixmap_nocache(idx,phys)宏。这两个函数都把fix_to_virt(idx)线性地址对应的一个页表项初始化为物理地址phys；不过，第二个函数也把页表项的PCD标志置位，因此，当访问这个页框中的数据时禁用硬件高速缓存。反过来，clear_fixmap(idx)用来撤消固定映射线性地址idx和物理地址之间的连接。
+
+#### 处理硬件高速缓存和TLB
+
+硬件高速缓存是通过高速缓存行(cache line)寻址的。L1_CACHE_BYTES宏产生以字节为单位的高速缓存行的大小。在早于Pentium 4的Intel模型中，这个宏产生的值为32;在Pentium 4上，它产生的值为128。
+
+- 为了使高速缓存的命中率达到最优化，内核在下列决策中考虑体系结构：
+  一个数据结构中最常使用的字段放在该数据结构内的低偏移部分，以便它们能够处于高速缓存的同一行中。
+- 当为一大组数据结构分配空间时，内核试图把它们都存放在内存中，以便所有高速缓存行按同一方式使用。
+
+x86微处理器自动处理高速缓存的同步，所以应用于这种处理器的Linux内核并不处理任何硬件高速缓存的刷新。不过内核却为不能同步高速缓存的处理器提供了高速缓存刷新接口。
+
+处理器不能自动同步它们自己的TLB高速缓存，因为决定线性地址和物理地址之间映射何时不再有效的是内核，而不是硬件。
+
+Linux 2.6提供了几种在合适时机应当运用的TLB刷新方法，这取决于页表更换的类型。
+
+| 方法名称                   | 说明                      | 典型的应用时机        |
+| ---------------------- | ----------------------- | -------------- |
+| flush_tlb_all          | 刷新所有TLB表项               | 改变内核页表项时       |
+| flush_tlb_kernel_range | 刷新给定线性地址范围内的所有TLB表项     | 更换一个范围内的内核页表项时 |
+| flush_tlb              | 刷新当前进程拥有的非全局页相关的所有TLB表项 | 执行进程切换时        |
+| flush_tlb_mm           | 刷新指定进程拥有的非全局页相关的所有TLB表项 | 创建一个新的子进程时     |
+| flush_tlb_range        | 刷新指定进程的线性地址间隔对应的TLB表项   | 释放某个进程的线性地址间隔时 |
+| flush_tlb_pgtables     | 刷新指定进程中特定的相临页表集相关的TLB表项 | 释放进程的一些页表时     |
+| flush_tlb_page         | 刷新指定进程中单个页表项相关的TLB表项    | 处理缺页异常时        |
+
+尽管普通Linux内核提供了丰富的TLB方法，但通常每个微处理器都提供了更受限制的一组使TLB无效的汇编语言指令。在这个方面，一个更为灵活的硬件平台就是Sun的U1traSPARC。与之相比，Intel微处理器只提供了两种使TLB无效的技术：
+
+- 在向cr3寄存器写入值时所有Pentium处理器自动刷新相对于非全局页的TLB表项。
+- 在Pentium Pro及以后的处理器中，invlpg汇编语言指令使映射指定线性地址的单个TLB表项无效。
+
+下表列出了采用这种硬件技术的Linux宏；这些宏是实现独立于系统的方法（上表）的基本要素。
+
+| 宏名称                      | 描述                                       | 使用对象                                   |
+| ------------------------ | ---------------------------------------- | -------------------------------------- |
+| __flush_tlb()            | 将cr3寄存器的当前值重新写回cr3                       | flush_tlb，flush_tlb_mm，flush_tlb_range |
+| __flush_tlb_global()     | 通过清除cr4的PGE禁用全局页，将cr3寄存器的当前值重新写回cr3，并在此设置PGE标志 | flush_tlb_all，flush_tlb_kernel_range   |
+| __flush_tlb_single(addr) | 以addr为参数执行invlpg汇编语言指令                   | flush_tlb_page                         |
+
+上表中没有flush tlb_pgtables方法：在x86系统中，当页表与父页表解除链接时什么也不需要做，所以实现这个方法的函数为空。
+
+独立于体系结构的使TLB无效的方法非常简单地扩展到了多处理器系统上。在一个CPU上运行的函数发送一个处理器间中断给其他的CPU来强制它们执行适当的函数使TLB无效。
+
+一般来说，任何进程切换都会暗示着更换活动页表集。相对于过期页表，本地TLB表项必须被刷新；这个过程在内核把新的页全局目录的地址写入cr3控制寄存器时会自动完成。不过内核在下列情况下将避免TLB被刷新：
+
+- 当两个使用相同页表集的普通进程之间执行进程切换时。
+- 当在一个普通进程和一个内核线程间执行进程切换时。（内核线程无自己的页表集，使用上一个普通进程的页表集）
+
+除了进程切换以外，还有其他几种情况下内核需要刷新TLB中的一些表项。例如，当内核为某个用户态进程分配页框并将它的物理地址存人页表项时，它必须刷新与相应线性地址对应的任何本地TLB表项。在多处理器系统中，如果有多个CPU在使用相同的页表集，那么内核还必须刷新这些CPU上使用相同页表集的TLB表项。
+
+为了避免多处理器系统上无用的TLB刷新，内核使用一种叫做懒惰TLB (lazy TLB)模式的技术。其基本思想是，如果几个CPU正在使用相同的页表，而且必须对这些CPU上的一个TLB表项刷新，那么，在某些情况下，正在运行内核线程的那些CPU上的刷新就可以延迟。
+
+事实上，每个内核线程并不拥有自己的页表集，它使用一个普通进程的的页表集。不过，没有必要使一个用户态线性地址对应的TLB表项无效，因为内核线程不访问内核态地址空间。（flush_tlb_all方法不使用懒惰TLB模式机制）
+
+当某个CPU开始运行一个内核线程时，内核把它置为懒惰TLB模式。当发出清除TLB表项的请求时，处于懒惰TLB模式的每个CPU都不刷新相应的表项。但是，CPU记住它的当前进程正运行在一组页表上，而这组页表的TLB表项对用户态地址是无效的。只要处于懒惰TLB模式的CPU用一个不同的页表集切换到一个普通进程，硬件就自动刷新TLB表项，同时内核把CPU设置为非懒惰TLB模式。然而，如果处于懒惰TLB模式的CPU切换到的进程与刚才运行的内核线程拥有相同的页表集，那么，任何使TLB无效的延迟操作必须由内核有效地实施；这种使TLB无效的“懒惰”操作可以通过刷新CPU的所有非全局TLB项来有效地获取。
+
+为了实现懒惰TLB模式，需要一些额外的数据结构。cpu_tlbstate变量是一个具有NR_CPUS个结构的静态数组，这个结构有两个字段，一个是指向当前进程内存描述符的active_ mm字段，一个是具有两个状态值的state字段:TLBSTATE_ OK(非懒惰TLB模式)或TLBSTATE_LAZY(懒惰TLB模式)。此外，每个内存描述符中包含一个cpu_vm_mask字段，该字段存放的是CPU(这些CPU将要接收与TLB刷新相关的处理器间中断)下标；只有当内存描述符属于当前运行的一个进程时这个字段才有意义。
+
+当一个CPU开始执行内核线程时、内核把该CPU的cpu_tlbstate元素的state字段置为TLBSTATE_LAZY。此外，活动(active)内存描述符的cpu_vm_mask字段存放系统中所有CPU(包括进人懒惰TLB模式的CPU)的下标。对于与给定页表集相关的所有CPU的TLB表项，当另外一个CPU想使这些表项无效时，该CPU就把一个处理器间中断发送给下标处于对应内存描述符的cpu_vm_mask字段中的那些CPU。
+
+当CPU接受到一个与TLB刷新相关的处理器间中断，并验证它影响了其当前进程的页表集时，它就检查它的cpu_tlbstate元素的state字段是否等于TLBSTATE_LAZY；如果等于，内核就拒绝使TLB表项无效，并从内存描述符的cpu_vm_mask字段删除该CPU下标。这有两种结果：
+
+- 只要CPU还处于懒惰TLB模式，它将不接受其他与TLB刷新相关的处理器间中断。
+- 如果CPU切换到另一个进程，而这个进程与刚被替换的内核线程使用相同的页表集，那么内核调用\_\_flush_tlb()使该CPU的所有非全局TLB表项无效。
 
 ## L-B：第8章 内存管理
 
