@@ -1,5 +1,3 @@
-
-
 ## 第1章 绪论
 
 Linux是类Unix (Unix-like)操作系统大家族中的一名成员。1991年，Linus Torvalds开发出最初的Linux，它作为一个适用于基于Intel 80386微处理器的IBM PC兼容机的操作系统。Linux最吸引人的一个优点就在于它不是商业操作系统：它的源代码在GNU公共许可证(General Pwblic License, GPL)下是开放的，任何人都可以获得源代码并研究它。
