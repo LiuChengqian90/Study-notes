@@ -1,1024 +1,640 @@
-32位，虚拟地址 寻址空间为4G，0x00000000~0xffffffff  （或者 32根地址总线，2^32），另外，若支持PAE可以进行扩展。
 
-Q：为什么用户空间为3GB，而内核为1GB？
 
-A：和体系结构相关，如mips的在2GB处（内核编译时 KERNEL_BASE 或 CONFIG_KERNEL_START）；Linux的保护机制，特权地址区；
+## 第1章 绪论
 
-1、进程用户空间栈和内核栈
+Linux是类Unix (Unix-like)操作系统大家族中的一名成员。1991年，Linus Torvalds开发出最初的Linux，它作为一个适用于基于Intel 80386微处理器的IBM PC兼容机的操作系统。Linux最吸引人的一个优点就在于它不是商业操作系统：它的源代码在GNU公共许可证(General Pwblic License, GPL)下是开放的，任何人都可以获得源代码并研究它。
 
-## L-A：第12章 内存管理
+从技术角度来说，Linux是一个真正的Unix内核，但它不是一个完全的Unix操作系统，这是因为它不包含全部的Unix应用程序，诸如文件系统实用程序、窗口系统及图形化桌面、系统管理员命令、文本编辑程序、编译程序等等。不过，因为以上大部分应用程序都可在GNU许可证下免费获得，因此，可以把它们安装在任何一个基于Linux内核的系统中。
 
-在内核里分配内存不像在其他地方分配内存那么容易。从根本上讲，是因为内核本身不能像用户空间那样奢侈地使用内存。内核不支持简单便捷的内存分配方式。比如，内核一般不能睡眠。再加上内存分配机制不能太复杂，所以内核中获取内存要比在用户空间复杂得多。
+### Linux 和 其他类Unix内核的比较
 
-### 页
+Linux与一些著名的商用Unix内核到底如何竞争，下面给予描述：
 
-内核把物理页作为内存管理的基本单位。尽管处理器的最小可寻址单元通常为字（甚至字节），但是，内存管理单元（MMU，管理内存并把虚拟地址转换为物理地址的硬件）通常以页为单位进行处理。正因为如此，MMU以页（page）大小为单位来管理系统中的页表。从虚拟内存的角度来看，页就是最小单位。
+- 单块结构的内核(Monolithic kernel)
 
-体系结构不同，支持的页的大小也不同，还有些体系结构甚至支持几种不同的页大小。大多数32位体系结构支持4KB的页，而64位体系结构一般支持8KB的页。也就是说，支持4KB页大小、1GB物理内存的机器上，物理内存会被划分为262144个页。
+  它是一个庞大、复杂的自我完善(do-it-yourself)程序，由几个逻辑上独立的成分构成。在这一点上，它是相当传统的，大多数商用Unix变体也是单块结构。(一个显著的例外是Apple的Mac Os X和GNU的Hurd操作系统，它们都是从卡耐基-梅隆大学的Mach演变而来的，都遵循微内核的方法。)
 
-内核用struct page结构表示系统中的每个物理页，该结构位于<linux/mm_types.h>中。
+
+- 编泽并静态连接的传统Unix内核
+
+  大部分现代操作系统内核可以动态地装载和卸载部分内核代码(典型的例子如设备驱动程序)，通常把这部分代码称做模块(module)。Linux对模块的支持是很好的，因为它能自动按需装载或卸载模块。在主要的商用Unix变体中，只有SVR4.2和Solaris内核有类似的特点。
+
+
+- 内核线程
+
+  一些Unix内核，如Solaris和SVR4.2/MP，被组织成一组内核线程( kernel thread )。内核线程是一个能被独立调度的执行环境(context)，也许它与用户程序有关，也许仅仅执行一些内核函数。线程之间的上下文切换比普通进程之间的上下文切换花费的代价要少得多，因为前者通常在同一个地址空间执行。Linux以一种十分有限的方式使用内核线程来周期性地执行几个内核函数，但是，它们并不代表基本的执行上下文的抽象(这就是下面要讨论的议题)。
+
+
+- 多线程应用程序支持
+
+  大多数现代操作系统在某种程度上都支持多线程应用程序，也就是说，这些用户程序是根据很多相对独立的执行流来设计的，而这些执行流之间共享应用程序的大部分数据结构。一个多线程用户程序由很多轻量级进程(lightweight process, LWP)组成，这些进程可能对共同的地址空间、共同的物理内存页、共同的打开文件等等进行操作。Linux定义了自己的轻量级进程版本，这与SVR4, Solaris等其他系统上所使用的类型有所不同。当LWP的所有商用Unix变体都基于内核线程时，Linux却把轻量级进程当作基本的执行上下文，通过非标准的clone()系统调用来处理它们。
+
+
+- 抢占式(preemptive) 
+
+  当采用“可抢占的内核”选项来编译内核时，Linux2.6可以随意交错执行处于特权模式的执行流。除了Linux 2.6，还有其他一些传统的、通用的Unix系统(如Solaris和Mach3.0)是完全的抢占式内核。S V R4.2/M P通过引入一些固定抢占点(fixed preemption goint)的方法获得有限的抢占能力。
+
+
+- 多处理器支持
+
+  几种Unix内核变体都利用了多处理器系统。Linux 2.6支持不同存储模式的对称多处理(SMP)，包括NUMA:系统不仅可以使用多处理器，而且每个处理器可以毫无区别地处理任何一个任务。尽管通过一个单独的“大内核锁”使得内核中的少数代码依然串行执行，但公平地说，Linux 2.6以几乎最优化的方式使用SMP。
+
+
+- 文件系统
+
+  Linux标准文件系统呈现出多种风格。如果你没有特殊需要，就可以使用普通的Ext2文件系统。如果你想避免系统崩溃后冗长的文件系统检查，就可以切换到Ext3。如果你不得不处理很多小文件，ReiserFS文件系统可能就是最好的选择。除了Ext3和ReiserFS，还可以在Linux中使用另外几个日志文件系统，这些文件系统包括IBM AIX的日志文件系统(Journaling File System, JFS)和SGI公司IRIX 系统上的XFS文件系统。有了强大的面向对象虚拟文件系统技术(为Solaris和SVR4所采用)，把外部文件系统移植到Linux比移植到其他内核相对要容易。
+
+
+- STREAMS
+
+  尽管现在大部分的Unix内核内包含了SRV4引入的STREAMS I/O子系统，并且 已变成编写设备驱动程序、终端驱动程序及网络协议的首选接口，但是Linux并没有与此类似的子系统。
+
+与商业化的操作系统相比，Linux已经具备足够的竞争力。而且，Linux一些独具特色的特点使其成为一种趣味盎然的操作系统。商业化的Unix内核为了赢得更大的市场份额通常也引入了新特征，但这些特征本是可有可无，其稳定性和效率都值得商榷。事实上，现代Unix内核有向更臃肿变化的倾向，而Linux以及其他开放源代码的操作系统不受市场因素的制约，因此可以根据设计者的想法(主要是Linus Torvalds的想法)自由地演进。尤其是，与商用竞争对手相比，Linux有如下优势:
+
+- Linux是免费的。除硬件之外，你无需任何花费就能安装一套完整的Linux系统。
+
+- Linux的所有成分都可以充分地定制。通过内核编译选项，你可以选择自己真正需要的特征来定制内核。
+- Linux可以运行在低档、便宜的硬件平台上。你可以用一个4MB内存的旧Intel 80386系统构建网络服务器。
+- Linux是强大的。由于充分挖掘了硬件部分的特点，使得Linux系统速度非常快。Linux的主要目标是效率，所以，商用系统的许多设计选择由于有降低性能的隐患而被Linus舍弃，如STREAMSI/O子系统。
+- Linux的开发者都是非常出色的程序员。Linux系统非常稳定，有非常低的故障率和非常少系统维护时间。
+- Linux内核非常小，而且紧凑。我们甚至可以把一个内核映像和一些系统程序放在一张1.4MB的软盘上!据我们所知，没有一个商用Unix变体能从一张软盘上启动。
+- Linux与很多通用操作系统商度兼容。Linux可以让你直接安装以下文件系统的所有版本:MS-DOS和MS Windows, SVR4, OS/2,  Mac OS X, Solaris, SunOS, NEXTSTEP，还有很多BSD变体等等。另外， Linux也能对很多网络层进行操作，这些网络层如以太网[如:快速以太网和高速(Gbit/s及lOGbit/s)以太网]、光纤分布式数据接口(Fiber Distributed Data Interface, FDDI)、高性能并行接口( High Performance Parallel Interface,  HIPPI ) ,  IEEE 802.11(无线局域网)和IEEE802.15(蓝牙)。。通过使用适当的库函数，Linux系统甚至能直接运行为其他操作系统所编写的程序。例如，Linux能执行为以下操作系统所编写的应用程序: MS-DOS,  MS Windows, SVR3及SV R4, 4.4BSD,  SCO Unix, Xenix，以及其他在Intel 80x86平台上运行的操作系统。
+- Linux有很好的技术支持。
+
+### 硬件的依赖性
+
+Linux试图在硬件无关的源代码与硬件相关的源代码之间保持清晰的界限。为了做到这点，在arch和include目录下包含了23个子目录，以对应Linux所支持的不同硬件平台。这些平台的标准名字如下：
+
+| 平台            | 简介                                       |
+| ------------- | ---------------------------------------- |
+| alpha         | HP的Alpha工作站，最早属于Digital公司，后来属于Cpmpag公司，现在不再生产。 |
+| arm,arm26     | 基于ARM处理器的计算机（如PDA）和嵌入式设备。                |
+| cris          | Axis在它的瘦服务器中使用的“代码精简指令集（Code Reduced Instruction Set）”CPU，用在诸如Web摄像机或开发主板中。 |
+| frv           | 基于Fujitsu FR-V系列微处理器的嵌入式系统。              |
+| h8300         | Hitachi h8/300 和 h8S的8位和16位RISC微处理器。     |
+| i386          | 基于80x86微处理器的IBM兼容个人计算机。                  |
+| ia64          | 基于64位Itanium微处理器的工作站。                    |
+| m32r          | 基于Renesas M32R系列微处理器的计算机。                |
+| m68k,m68nommu | 基于Motorola MC680x0微处理器的个人计算机。            |
+| mips          | 基于MIPS微处理器的工作站。                          |
+| parisc        | 基于HP公司HP 9000 PA-RISC微处理器的工作站。           |
+| ppc,ppc64     | 基于Motorola-IBM PowerPC32位和64位微处理器的工作站。   |
+| s390          | IBM ESA/390及zSeries大型机。                  |
+| sh,sh64       | 基于Hitachi和STMicroelectronics联合开发的SuperH微处理器的嵌入式系统。 |
+| sparc,sparc64 | 基于Sun公司SPARC和64位Ultra SPARC微处理器的工作站。     |
+| um            | 用户态的Linux——一个允许开发者在用户态下运行内核的虚拟平台。        |
+| v850          | 集成了基于Harvard体系结构的32位RISC核心的NEC V850微控制器。 |
+| x86_64        | 基于AMD的64位微处理器的工作站。                       |
+
+### Linux版本
+
+一直到2.5版本的内核，Linux都通过简单的编号来区别内核的稳定版和开发版。每个版本号用三个数字描述，由圆点分隔。前两个数字用来表示版本号，第三个数字表示发布号。第二位版本号表示内核的类型:如果为偶数，表示稳定的内核；否则，表示开发中的内核。
+
+在Linux内核2.6版的开发过程中，内核版本的编号方式发生了很大的变化。主
+要变化在于第二个数字已经不再用于表示一个内核是稳定版本还是正在开发的版本。因此，现在内核开发者都在当前的2.6版本中对内核进行大幅改进。只有在内核开发者必须对内核的重大修改进行测试时，才会采用一个新的内核分支。这种分支要么产生一个新的内核版本，要么干脆丢弃所修改的部分而回退到2.6版。
+
+Linux这种新的开发模式意味着两种内核具有相同的版本号，但却有不同的发布号，如2.6.10和2.6.11内核就可能在核心部件和基本算法上有很大的差别。这样一来，具有新发布号的内核可能潜藏着不稳定性和各种错误。为了解决这个问题，内核开发者可能发布带有补丁程序的内核版本，并且用第四位数字表示带有不同补丁的内核版本。例如，2.6.11.12。
+
+必须强调的是本书描述的是Linux2.6.11版的内核。
+
+### 操作系统基本概念
+
+任何计算机系统都包含一个名为操作系统的基本程序集合。在这个集合里，最重要的程序称为内核(kernel)。当操作系统启动时，内核被装入到RAM中，内核中包含了系统运行所必不可少的很多核心过程(procedure)。其他程序是一些不太重要的实用程序，尽管这些程序为用户提供了与计算机进行广泛交流的经验(以及用户买计算机要做的所有工作)，但系统根本的样子和能力还是由内核决定。内核也为系统中所有事情提供了主要功能，并决定高层软件的很多特性。因此，我们将经常使用术语“操作系统”作为“内核”的同义词。操作系统必须完成两个主要目标：
+
+- 与硬件部分交互，为包含在硬件平台上的所有低层可编程部件提供服务。
+- 为运行在计算机系统上的应用程序(即所谓用户程序)提供执行环境。
+
+一些操作系统允许所有的用户程序都直接与硬件部分进行交互(典型的例子是MS-DOS)。与此相反，类Unix操作系统把与计算机物理组织相关的所有低层细节都对用户运行的程序隐藏起来。当程序想使用硬件资源时，必须向操作系统发出一个请求。内核对这个请求进行评估，如果允许使用这个资源，那么，内核代表应用程序与相关的硬件部分进行交互。
+
+为了实施这种机制，现代操作系统依靠特殊的硬件特性来禁止用户程序直接与低层硬件部分进行交互，或者禁止直接访问任意的物理地址。特别是，硬件为CPU引入了至少两种不同的执行模式：用户程序的非特权模式和内核的特权模式。Unix把它们分别称为用户态(User Mode)和内核态(Kernel Mode )。
+
+#### 多用户系统
+
+多用户系统(multiuser system)就是一台能并发和独立地执行分别属于两个或多个用户的若干应用程序的计算机。
+
+- “并发”(concurrently)意味着几个应用程序能同时处于活动状态并竟争各种资源，如CPU、内存、硬盘等等。
+- “独立”( independently)意味着每个应用程序能执行自己的任务，而无需考虑其他用户的应用程序在干些什么。
+
+当然，从应用程序切换会使每个应用程序的速度有所减慢，从而影响用户看到的响应时间。现代操作系统内核提供的许多复杂特性减少了强加在每个程序上的延迟时间，给用户提供了尽可能快的响应时间。
+
+多用户操作系统必须包含以下几个特点：
+
+- 核实用户身份的认证机制。
+- 防止有错误的用户程序防碍其他应用程序在系统中运行的保护机制。
+- 防止有恶意的用户程序干涉或窥视其他用户的活动的保护机制。
+- 限制分配给每个用户的资源数的计账机制。
+
+为了确保能实现这些安全保护机制，操作系统必须利用与CPU特权模式相关的硬件保护机制，否则，用户程序将能直接访问系统电路并克服强加于它的这些限制。unix是实施系统资源硬件保护的多用户系统。
+
+#### 用户和组
+
+在多用户系统中，每个用户在机器上都有私用空间；典型地，他拥有一定数量的磁盘空间来存储文件、接收私人邮件信息等等。操作系统必须保证用户空间的私有部分仅仅对其拥有者是可见的。特别是必须能保证，没有用户能够开发一个用于侵犯其他用户私有空间的系统应用程序。
+
+所有的用户由一个惟一的数字来标识，这个数字叫用户标识符(User ID,  UID)。通常一个计算机系统只能由有限的人使用。当其中的某个用户开始一个工作会话时，操作系统要求输入一个登录名和口令，如果用户输入的信息无效，则系统拒绝访问。因为口令是不公开的，所以用户的保密性得到了保证。
+
+为了和其他用户有选择地共享资料，每个用户是一个或多个用户组的一名成员，组由唯一的用户组标识符(user group ID)标识。每个文件也恰好与一个组相对应。例如，可以设置这样的访问权限，拥有文件的用户具有对文件的读写权限，同组用户仅有只读权限，而系统中的其他用户没有对文件的任何访问权限。
+
+任何类Unix操作系统都有一个特殊的用户，叫做root，即超级用户(superuser)。系统管理员必须以root的身份登录，以便处理用户账号，完成诸如系统备份、程序升级等维护任务。root用户几乎无所不能，因为操作系统对他不使用通常的保护机制。尤其是，root用户能访向系统中的每一个文件，能干涉每一个正在执行的用户程序的活动。
+
+#### 进程
+
+所有的操作系统都使用一种基本的抽象:进程(process)。一个进程可以定义为:“程序执行时的一个实例”，或者一个运行程序的“执行上下文”。在传统的操作系统中，一个进程在地址空间(address space)中执行一个单独的指令序列。地址空间是允许进程引用的内存地址集合。现代操作系统允许具有多个执行流的进程，也就是说，在相同的地址空间可执行多个指令序列。
+
+多用户系统必须实施一种执行环境，在这种环境里，几个进程能并发活动，并能竟争系统资源(主要是CPU )。允许进程并发活动的系统称为多道程序系统(multiprogramming)或多处理系统(multiprocessing)。区分程序和进程是非常重要的：几个进程能并发地执行同一程序，而同一个进程能顺序地执行几个程序。
+
+在单处理器系统上，只有一个进程能占用CPU，因此，在某一时刻只能有一个执行流。一般来说，CPU的个数总是有限的，因而只有少数几个进程能同时执行。操作系统中叫做调度程序(scheduler)的部分决定哪个进程能执行。一些操作系统只允许有非抢占式(nonpreemptable)进程，这就意味着，只有当进程自愿放弃CPU时，调度程序才被调用。但是，多用户系统中的进程必须是抢占式的(preemptable )。操作系统记录下每个进程占有的CPU时间，并周期性地激活调度程序。
+
+Unix是具有抢占式进程的多处理操作系统。即使没有用户登录，没有程序运行，也还是有几个系统进程在监视外围设备。尤其是，有几个进程在监听系统终端等待用户登录。当用户输人一个登录名，监听进程就运行一个程序来验证用户的口令。如果用户身份得到证实，那么监听进程就创建另一个进程来执行shell，此时在shell下可以输人命令。当一个图形化界面被激活时，有一个进程就运行窗口管理器，界面上的每个窗口通常都由一个单独的进程来执行。如果用户创建了一个图形化shell，那么，一个进程运行图形化窗口，而第二个进程运行用户可以输人命令的shell。对每一个用户命令，shell进程都创建执行相应程序的另一个进程。
+
+Unix操作系统采用进程/内核模式。每个进程都自以为它是系统中唯一的进程，可以独占操作系统所提供的服务。只要进程发出系统调用(即对内核提出请求)，硬件就会把特权模式由用户态变成内核态，然后进程以非常有限的目的开始一个内核过程的执行。这样，操作系统在进程的执行上下文中起作用，以满足进程的请求。一旦这个请求完全得到满足，内核过程将迫使硬件返回到用户态，然后进程从系统调用的下一条指令继续执行。
+
+#### 内核体系结构
+
+如前所述，大部分Unix内核是单块结构:每一个内核层都被集成到整个内核程序中，并代表当前进程在内核态下运行。相反，微内核(microkernel)操作系统只需要内核有一个很小的函数集，通常包括几个同步原语、一个简单的调度程序和进程间通信机制。运行在微内核之上的几个系统进程实现从前操作系统级实现的功能，如内存分配程序、设备驱动程序、系统调用处理程序等等。
+
+尽管关于操作系统的学术研究都是面向微内核的，但这样的操作系统一般比单块内核的效率低，因为操作系统不同层次之间显式的消息传递要花费一定的代价。不过，微内核操作系统比单块内核有一定的理论优势。微内核操作系统迫使系统程序员采用模块化的方法，因为任何操作系统层都是一个相对独立的程序，这种程序必须通过定义明确而清晰的软件接口与其他层交互。此外，已有的微内核操作系统可以很容易地移植到其他的体系结构上，因为所有与硬件相关的部分都被封装进微内核代码中。最后，微内核操作系统比单块内核更加充分地利用了RAM，因为暂且不需要执行的系统进程可以被调出或撤消。
+
+为了达到微内核理论上的很多优点而又不影响性能，Linux内核提供了模块(module) 。模块是一个目标文件，其代码可以在运行时链接到内核或从内核解除链接。这种目标代码通常由一组函数组成，用来实现文件系统、驱动程序或其他内核上层功能。与微内核操作系统的外层不同，模块不是作为一个特殊的进程执行的。相反，与任何其他静态链接的内核函数一样，它代表当前进程在内核态下执行。
+
+使用模块的主要优点包括：
+
+- 摸块化方法
+
+  任何模块都可以在运行时被链接或解除链接，因此，系统程序员必须提出良定义的软件接口以访问由模块处理的数据结构。这使得开发新模块变得容易。
+
+- 平台无关性
+
+  即使模块依赖于某些特殊的硬件特点，但它不依赖于某个固定的硬件平台。例如，符合SCSI标淮的磁盘驱动程序模块，在IBM兼容PC与HP的Alpha机上都能很好地工作。
+
+- 节省内存使用
+
+  当需要模块功能时，把它链接到正在运行的内核中，否则，将该模块解除链接。这种机制对于小型嵌入式系统是非常有用的。
+
+- 无性能损关
+
+  模块的目标代码一旦被链接到内核，其作用与静态链接的内核的目标代码完全等价。因此，当模块的函数被调用时，无需显式地进行消息传递。
+
+### Unix文件系统概述
+
+Unix操作系统的设计集中反映在其文件系统上。
+
+#### 文件
+
+Unix文件是以字节序列组成的信息载体(container)，内核不解释文件的内容。很多编程的库函数实现了更高级的抽象，例如，由字段构成的记录以及基于关键字编址的记录。然而，这些库中的程序必须依靠内核提供的系统调用。从用户的观点来看，文件被组织在一个树结构的命名空间中。
+
+除了叶节点之外，树的所有节点都表示目录名。目录节点包含它下面文件及目录的所有信息。文件或目录名由除“/”和空字符“\0”之外的任意ASCII字符序列组成。大多数文件系统对文件名的长度都有限制，通常不能超过255个字符。与树的根相对应的目录被称为根目录(root directory)。按照惯例，它的名字是“/”。在同一目录中的文件名不能相同，而在不同目录中的文件名可以相同。
+
+Unix的每个进程都有一个当前工作目录，它属于进程执行上下文(execution context)，标识出进程所用的当前目录。为了标识一个特定的文件，进程使用路径名(pcothname )，路径名由斜杠及一列指向文件的目录名交替组成。如果路径名的第一个字符是斜杠，那么这个路径就是所谓的绝对路径，因为它的起点是根目录。否则，如果第一项是目录名或文件名，那么这个路径就是所谓的相对路径，因为它的起点是进程的当前目录。
+
+当标识文件名时，也用符号“.”和“..”。它们分别标识当前工作目录和父目录。如果当前工作目录是根目录，“.”和“..”就是一致的。
+
+#### 硬链接和软链接
+
+包含在目录中的文件名就是一个文件的硬链接(hard link)，或简称链接(Link)。在同一目录或不同的目录中，同一文件可以有几个链接，因此对应几个文件名。
+
+```shell
+ln P1 P2
+```
+
+用来创建一个新的硬链接，即为由路径P1标识的文件创建一个路径名为P2的硬链接。
+硬链接有两方面的限制：
+
+- 不允许用户给目录创建硬链接。因为这可能把目录树变为环形图，从而就不可能通过名字定位一个文件。
+- 只有在同一文件系统中的文件之间才能创建链接。这带来比较大的限制，因为现代Unix系统可能包含了多种文件系统，这些文件系统位于不同的磁盘和/或分区，用户也许无法知道它们之间的物理划分。
+
+为了克服这些限制，引入了软链接(soft link)[也称符号链接(symbolic link)]。符号链接是短文件，这些文件包含有另一个文件的任意一个路径名。路径名可以指向位于任意一个文件系统的任意文件或目录，甚至可以指向一个不存在的文件。
+
+```shell
+ln -s  P1  P2
+```
+
+创建一个路径名为P2的新软链接，P2指向路径名P1。当这个命令执行时，文件系统抽出P2的目录部分，并在那个目录下创建一个名为P2的符号链接类型的新项。这个新文件包含路径名P1。这样，任何对P2的引用都可以被自动转换成指向P1的一个引用。
+
+#### 文件类型
+
+- 普通文件(regular file)
+- 目录
+- 符号链接
+- 面向块的设备文件(block-oriented device file)
+- 面向字符的设备文件(character-oriented device file)
+- 管道(pipe)和命名管道(named pipe )(也叫F1F0 )
+- 套接字(socket)
+
+前三种文件类型是所有Unix文件系统的基本类型。
+
+设备文件与I/O设备以及集成到内核中的设备驱动程序相关。例如，当程序访问设备文件时，它直接访问与那个文件相关的I/O设备。
+
+管道和套接字是用于进程间通信的特殊文件。
+
+#### 文件描述符与索引点
+
+Unix对文件的内容和描述文件的信息给出了清楚的区分。除了设备文件和特殊文件系统文件外，每个文件都由字符序列组成。文件内容不包含任何控制信息，如文件长度或文件结束(end-of-file,EOF )符。
+文件系统处理文件需要的所有信息包含在一个名为索引节点(inode)的数据结构中。每个文件都有自己的索引节点，文件系统用索引节点来标识文件。
+
+虽然文件系统及内核函数对索引节点的处理可能随Unix系统的不同有很大的差异，但它们必须至少提供在POSIX标准中指定的如下属性：
+
+- 文件类型
+- 与文件相关的硬链接个数
+- 以字节为单位的文件长度
+- 设备标识符(即包含文件的设备的标识符)
+- 在文件系统中标识文件的索引节点号
+- 文件拥有者的UID
+- 文件的用户组ID
+- 几个时间戳，表示索引节点状态改变的时间、最后访问时间及最后修改时间
+- 访问权限和文件模式
+
+#### 访问权限和文件模式
+
+文件的潜在用户分为三种类型：
+
+- 作为文件所有者的用户
+- 同组用户，不包括所有者
+- 所有剩下的用户(其他)
+
+有三种类型的访问权限——读、写及执行，每组用户都有这三种权限。因此，文件访问权限的组合就用9种不同的二进制来标记。还有三种附加的标记，即:uid (Set User ID),sgid (Set Group ID)，及sticky用来定义文件的模式。当这些标记应用到可执行文件时有如下含义：
+
+- suid
+
+  进程执行一个文件时通常保持进程拥有者的UID。然而，如果设置了可执行文件suid的标志位，进程就获得了该文件拥有者的UID。
+
+- sgid
+
+  进程执行一个文件时保持进程组的用户组ID。然而，如果设置了可执行文件sgid的标志位，进程就获得了该文件用户组的ID。
+
+- sticky
+
+  设置了sticky标志位的可执行文件相当于向内核发出一个请求，当程序执行结   束以后，依然将它保留在内存(已过时)。
+
+当文件由一个进程创建时，文件拥有者的ID就是该进程的UID。而其用户组ID可以是进程创建者的ID，也可以是父目录的ID，这取决于父目录sgid标志位的值。
+
+#### 文件操作的系统调用
+
+当用户访问一个普通文件或目录文件的内容时，他实际上是访问存储在硬件块设备上的一些数据。从这个意义上说，文件系统是硬盘分区物理组织的用户级视图。因为处于用户态的进程不能直接与低层硬件交互，所以每个实际的文件操作必须在内核态下进行。因此，Unix操作系统定义了几个与文件操作有关的系统调用。
+
+所有Unix内核都对硬件块设备的处理效率给予极大关注，其目的是为了获得非常好的系统整体性能。在后面的章节中，我们将描述Linux与文件操作相关的主题，尤其是讨论内核如何对文件相关的系统调用作出反应。为了理解这些内容，你需要知道如何使用文件操作的主要系统调用。下面对此给予描述。
+
+##### 打开文件
+
+进程只能访问“打开的”文件。为了打开一个文件，进程调用系统调用：
 
 ```c
-struct page {
-	unsigned long flags;		/* Atomic flags, some possibly updated asynchronously(异步) */
-	atomic_t _count;		/* Usage count, see below. */
-	union {
-		atomic_t _mapcount;	/* Count of ptes mapped in mms,
-					 * to show when page is mapped
-					 * & limit reverse map searches.
-					 */
-		struct {		/* SLUB */
-			u16 inuse;
-			u16 objects;
-		};
-	};
-	union {
-	    struct {
-		unsigned long private;		/* Mapping-private opaque data:
-					 	 * usually used for buffer_heads
-						 * if PagePrivate set; used for
-						 * swp_entry_t if PageSwapCache;
-						 * indicates order in the buddy
-						 * system if PG_buddy is set.
-						 */
-		struct address_space *mapping;	/* If low bit clear, points to
-						 * inode address_space, or NULL.
-						 * If page mapped as anonymous
-						 * memory, low bit is set, and
-						 * it points to anon_vma object:
-						 * see PAGE_MAPPING_ANON below.
-						 */
-	    };
-#if USE_SPLIT_PTLOCKS
-	    spinlock_t ptl;
-#endif
-	    struct kmem_cache *slab;	/* SLUB: Pointer to slab */
-	    struct page *first_page;	/* Compound tail pages */
-	};
-	union {
-		pgoff_t index;		/* Our offset within mapping. */
-		void *freelist;		/* SLUB: freelist req. slab lock */
-	};
-	struct list_head lru;		/* Pageout list, eg. active_list
-					 * protected by zone->lru_lock !
-					 */
-	/*
-	 * On machines where all RAM is mapped into kernel address space,
-	 * we can simply calculate the virtual address. On machines with
-	 * highmem some memory is mapped into kernel virtual memory
-	 * dynamically, so we need a place to store that address.
-	 * Note that this field could be 16 bits on x86 ... ;)
-	 *
-	 * Architectures with slow multiplication can define
-	 * WANT_PAGE_VIRTUAL in asm/page.h
-	 */
-#if defined(WANT_PAGE_VIRTUAL)
-	void *virtual;			/* Kernel virtual address (NULL if
-					   not kmapped, ie. highmem) */
-#endif /* WANT_PAGE_VIRTUAL */
-#ifdef CONFIG_WANT_PAGE_DEBUG_FLAGS
-	unsigned long debug_flags;	/* Use atomic bitops on this */
-#endif
-
-#ifdef CONFIG_KMEMCHECK
-	/*
-	 * kmemcheck wants to track the status of each byte in a page; this
-	 * is a pointer to such a status block. NULL if not tracked.
-	 */
-	void *shadow;
-#endif
-};
+fd = open(path, flag, mode);
 ```
 
-flag域用来存放页的状态。状态包括页是不是脏的，是不是该锁定在内存中等。flag每一位表示一种状态，因此它至少可同时表示32种不同的状态，这些标志定义在<linux/page-flags.h>中。
+- path：表示被打开文件的(相对或绝对)路径。
+- flag：指定文件打开的方式(例如，读、写、读/写、追加)。它也指定是否应当创建一个不存在的文件。
+- mode：指定新创建文件的访问权限。
 
-_count域存放页的引用计数。值变为-1时，说明内核没有引用这一页。内核代码调用page_count()函数进行检查，该函数唯一的参数是page结构，返回值0表示页空闲，正数表示在使用。一个页可以由页缓存使用（此时，mapping域指向和这个页关联的address_space对象），或者作为私有数据（由private指向），或者作为进程页表中的映射。
+这个系统调用创建一个“打开文件”对象，并返回所谓文件描述符(file descriptor)的标识符。一个打开文件对象包括：
 
-virtual域是页的虚拟地址。通常，它是页在虚拟内存中的地址。但是高端内存并不永久地映射到内核地址空间。此时，这个域的值为NULL，需要时，必须动态地映射这些页。
+- 文件操作的一些数据结构，如指定文件打开方式的一组标志;表示文件当前位置的offset字段，从这个位置开始将进行下一个操作(即所谓的文件指针)，等等。
+- 进程可以调用的一些内核函数指针。这组允许调用的函数集合由参数flag的值决定。
 
-必须理解的一点：page结构与物理页相关，而并非与拟页相关。因此，该结构对页的描述只是短暂的。即使页种所包含的数据继续存在。由于交换等原因，它们[^应该指数据]也可能并不再和同一个page结构相关联。内核仅仅用这个数据结构来描述当前时刻在相关的物理页中存放的东西。这种数据结构的目的在于描述物理页本身，而非其中的数据。
+POSIX语义所指定的一般特性：
 
-内核用这一结构来管理系统中的所有页，以便了解一个页是否空闲（也就是页有没有被分配）。如果页被分配，内核还需要知道谁拥有这个页。拥有者可能是用户空间进程、动态分配的内核数据、静态内核代码或页高速缓存等。
+-  文件描述符表示进程与打开文件之间的交互，而打开文件对象包含了与这种交互相关的数据。同一打开文件对象也许由同一个进程中的几个文件描述符标识。
+- 几个进程也许同时打开同一文件。在这种情况下，文件系统给每个文件分配一个单独的打开文件对象以及单独的文件描述符。当这种情况发生时，Unix文件系统对进程在同一文件上发出的I/O操作之间不提供任何形式的同步机制。然而，有几个系统调用，如flock()，可用来让进程在整个文件或部分文件上对I/O操作实施同步。
 
-### 区
+为了创建一个新的文件，进程也可以调用create()系统调用，它与open()非常相似，都是由内核来处理。
 
-由于硬件的限制，内核并不能对页一视同仁。有些页位于内存中特定的物理地址上，不能将其用于特定的任务。由于存在这种限制，所以内核把页划分为不同的区（zone）---对具有相似特征的页进行分组。Linux必须处理如下两种由于邮件存在缺陷而引起的内存寻址问题：
+##### 访问打开的文件
 
-- 一些硬件只能用某些特定的内存地址来执行DMA（直接内存访问）
-- 一些体系结构的内存物理寻址范围比虚拟寻址范围大的多。有一些内存不能永久地映射到内核空间。
+对普通Unix文件，可以顺序地访问，也可以随机地访问，而对设备文件和命名管道文件，通常只能顺序地访问。在这两种访问方式中，内核把文件指针存放在打开文件对象中，也就是说，当前位置就是下一次进行读或写操作的位置。
 
-<linux/mmzone.h>
-
-| ZONE_DMA     | 执行DMA操作                                  |
-| ------------ | ---------------------------------------- |
-| ZONE_DMA32   | 和ZOME_DMA类似，但是这些页面只能被32位设备访问。在某些体系结构中，该区比ZONE_DMA更大。 |
-| ZONE_NORMAL  | 能正常映射的页。                                 |
-| ZONE_HIGHMEM | 包含“高端内存”，其中的页并不能永久地映射到内核地址空间。            |
-
-区的使用和分布与体系结构相关。例如，某些体系结构在内存的任何地址上执行DMA都没有问题。在这些体系结构中，ZONE_DMA为空，ZONE_NORMAL就可以直接用于分配。与此相反，x86体系结构中，ISA设备就不在整个32位的地址空间中执行DMA，因为ISA设备只能访问物理内存前16MB。因此，ZONE_DMA在x86上包含的页都在0-16MB的内存范围。
-
-ZONE_HIGHMEM的工作方式也差不多。能否直接映射取决于体系结构。在32位x86系统上，ZONE_HIGHMEM为高于896MB的所有物理内存^非虚拟内存^。在其他体系结构撒花姑娘，由于所有内存都被直接映射，所以ZONE_HIGHMEM为空。ZONE_HIGHMEM所在的内存就是所谓的高端内存（high memory）。系统的其余内存就是所谓的低端内存（low memory）。
-
-| 区            | 描述      | 物理内存     |
-| ------------ | ------- | -------- |
-| ZONE_DMA     | DMA使用的页 | <16MB    |
-| ZONE_NORMAL  | 正常可寻址的页 | 16~896MB |
-| ZONE_HIGHMEM | 动态映射的页  | >896MB   |
-
-Linux把系统的页划分为区，形成不同的内存池，这样就可以根据用途进行分配了。注意，区的划分没有任何物理意义，这只不过是内核为了管理页而采取的一种逻辑上的分组。
-
-某些分配可能需要从特定的区中获取页，而另外一些分配则可以从多个区中获取页。比如，DMA内存必须从ZONE_DMA中进行分配，但是一般用途的内存既能从ZONE_DMA分配，也能从ZONE_NORMAL分配，不过不能同时从两个区分配，因为分配是不能跨区界限的。
-
-不是所有的体系结构都定义了全部区，有些64位的体系结构，如Intel的x86-64体系结构可以映射和处理64位的内存空间，所以x86-64没有ZONE_HIGHMEM区，所有内存都处于ZONE_DMA和ZONE_NORMAL区。
-
-每个区都用struct zone表示，在<linux/mmzone.h>定义：
+顺序访问是文件的默认访问方式，即read()和write()系统调用总是从文件指针的当前位置开始读或写。为了修改文件指针的值，必须在程序中显式地调用lseek ()系统调用。当打开文件时，内核让文件指针指向文件的第一个字节(偏移量为0)。
 
 ```c
-struct zone {
-	/* Fields commonly accessed by the page allocator */
-	/* zone watermarks, access with *_wmark_pages(zone) macros */
-	unsigned long watermark[NR_WMARK];
-	/*
-	 * We don't know if the memory that we're going to allocate will be freeable
-	 * or/and it will be released eventually, so to avoid totally wasting several
-	 * GB of ram we must reserve some of the lower zone memory (otherwise we risk
-	 * to run OOM on the lower zones despite there's tons of freeable ram
-	 * on the higher zones). This array is recalculated at runtime if the
-	 * sysctl_lowmem_reserve_ratio sysctl changes.
-	 */
-	unsigned long		lowmem_reserve[MAX_NR_ZONES];
-#ifdef CONFIG_NUMA
-	int node;
-	/*
-	 * zone reclaim becomes active if more unmapped pages exist.
-	 */
-	unsigned long		min_unmapped_pages;
-	unsigned long		min_slab_pages;
-#endif
-	struct per_cpu_pageset __percpu *pageset;
-	/*
-	 * free areas of different sizes
-	 */
-	spinlock_t		lock;
-	int                     all_unreclaimable; /* All pages pinned */
-#ifdef CONFIG_MEMORY_HOTPLUG
-	/* see spanned/present_pages for more description */
-	seqlock_t		span_seqlock;
-#endif
-	struct free_area	free_area[MAX_ORDER];
-#ifndef CONFIG_SPARSEMEM
-	/*
-	 * Flags for a pageblock_nr_pages block. See pageblock-flags.h.
-	 * In SPARSEMEM, this map is stored in struct mem_section
-	 */
-	unsigned long		*pageblock_flags;
-#endif /* CONFIG_SPARSEMEM */
-#ifdef CONFIG_COMPACTION
-	/*
-	 * On compaction failure, 1<<compact_defer_shift compactions
-	 * are skipped before trying again. The number attempted since
-	 * last failure is tracked with compact_considered.
-	 */
-	unsigned int		compact_considered;
-	unsigned int		compact_defer_shift;
-#endif
-	ZONE_PADDING(_pad1_)
-	/* Fields commonly accessed by the page reclaim scanner */
-	spinlock_t		lru_lock;	
-	struct zone_lru {
-		struct list_head list;
-	} lru[NR_LRU_LISTS];
-
-	struct zone_reclaim_stat reclaim_stat;
-	unsigned long		pages_scanned;	   /* since last reclaim */
-	unsigned long		flags;		   /* zone flags, see below */
-
-	/* Zone statistics */
-	atomic_long_t		vm_stat[NR_VM_ZONE_STAT_ITEMS];
-	/*
-	 * prev_priority holds the scanning priority for this zone.  It is
-	 * defined as the scanning priority at which we achieved our reclaim
-	 * target at the previous try_to_free_pages() or balance_pgdat()
-	 * invocation.
-	 *
-	 * We use prev_priority as a measure of how much stress page reclaim is
-	 * under - it drives the swappiness decision: whether to unmap mapped
-	 * pages.
-	 *
-	 * Access to both this field is quite racy even on uniprocessor.  But
-	 * it is expected to average out OK.
-	 */
-	int prev_priority;
-	/*
-	 * The target ratio of ACTIVE_ANON to INACTIVE_ANON pages on
-	 * this zone's LRU.  Maintained by the pageout code.
-	 */
-	unsigned int inactive_ratio;
-	ZONE_PADDING(_pad2_)
-	/* Rarely used or read-mostly fields */
-	/*
-	 * wait_table		-- the array holding the hash table
-	 * wait_table_hash_nr_entries	-- the size of the hash table array
-	 * wait_table_bits	-- wait_table_size == (1 << wait_table_bits)
-	 *
-	 * The purpose of all these is to keep track of the people
-	 * waiting for a page to become available and make them
-	 * runnable again when possible. The trouble is that this
-	 * consumes a lot of space, especially when so few things
-	 * wait on pages at a given time. So instead of using
-	 * per-page waitqueues, we use a waitqueue hash table.
-	 *
-	 * The bucket discipline is to sleep on the same queue when
-	 * colliding and wake all in that wait queue when removing.
-	 * When something wakes, it must check to be sure its page is
-	 * truly available, a la thundering herd. The cost of a
-	 * collision is great, but given the expected load of the
-	 * table, they should be so rare as to be outweighed by the
-	 * benefits from the saved space.
-	 *
-	 * __wait_on_page_locked() and unlock_page() in mm/filemap.c, are the
-	 * primary users of these fields, and in mm/page_alloc.c
-	 * free_area_init_core() performs the initialization of them.
-	 */
-	wait_queue_head_t	* wait_table;
-	unsigned long		wait_table_hash_nr_entries;
-	unsigned long		wait_table_bits;
-	/*
-	 * Discontig memory support fields.
-	 */
-	struct pglist_data	*zone_pgdat;
-	/* zone_start_pfn == zone_start_paddr >> PAGE_SHIFT */
-	unsigned long		zone_start_pfn;
-	/*
-	 * zone_start_pfn, spanned_pages and present_pages are all
-	 * protected by span_seqlock.  It is a seqlock because it has
-	 * to be read outside of zone->lock, and it is done in the main
-	 * allocator path.  But, it is written quite infrequently.
-	 *
-	 * The lock is declared along with zone->lock because it is
-	 * frequently read in pr0ximity to zone->lock.  It's good to
-	 * give them a chance of being in the same cacheline.
-	 */
-	unsigned long		spanned_pages;	/* total size, including holes */
-	unsigned long		present_pages;	/* amount of memory (excluding holes) */
-	/*
-	 * rarely used fields:
-	 */
-	const char		*name;
-} ____cacheline_internodealigned_in_smp;
+newoffset=lseek(fd, offset，whence);
 ```
 
-这个结构体很大，但是，系统中只有三个区，因此，也只有三个这样的结构。
-
-lock域是一个自旋锁，防止该结构被并发访问。注意，这个域只保护结构，而不保护驻留在这个区的所有页。没有特定的锁来保护单个页，但是，部分内核可以锁住在页中驻留的数据。
-
-watermark数组持有该区的最小值、最低和最高水位值。内核使用水位为每个内存区设置合适的内存消耗基准。该水位随空闲内存的多少而变化。
-
-name是一个以NULL的字符串，表示这个区的名字。内核启动期间初始化这个值，其代码位于mm/page_alloc.c中。三个区名字分别为“DMA”、“Normal”、“HighMem”。
-
-### 获得页
-
-内核提供了一种请求内存的底层机制，并提供了对它进行访问的几个接口。所有这些接口都以页为单位分配内存，定义于<linux/gfp.h>中。最核心函数是：
+- fd：表示打开文件的文件描述符。
+- offset：指定一个有符号整数值，用来计算文件指针的新位置。
+- whence：指定文件指针新位置的计算方式。可以是offset加0，表示文件指针从文件头移动，也可以是offset加文件指针的当前位置，表示文件指针从当前位置移动;还可以是offset加文件最后一个字节的位置，表示文件指针从文件末尾开始移动。
 
 ```c
-static inline struct page *
-alloc_pages(gfp_t gfp_mask, unsigned int order)
+nread= read(fd, buf，count);
 ```
 
-该函数分配2^order^（1<<order）个连续的物理页，并返回一个指针，该指针指向第一个页的page结构体，出错返回NULL。可以用
+- fd：表示打开文件的文件描述符。
+- buf：指定在进程地址空间中缓冲区的地址，所读的数据就放在这个缓冲区。
+- count：表示所读的字节数。
+
+当处理这样的系统调用时，内核会尝试从拥有文件描述符fd的文件中读count个字节，其起始位置为打开文件的offset字段的当前值。在某些情况下可能遇到文件结束、空管道等等，因此内核无法成功地读出全部count个字节。返回的nead值就是实际所读的字节数。给原来的值加上nread就会更新文件指针。write()的参数与read()相似。
+
+##### 关闭文件
+
+当进程无需再访问文件的内容时，就调用系统调用：
 
 ```c
-void * page_address(struct page *page)
+res=close(fd);
 ```
 
-将页转换成它的逻辑地址。如果无须用到struct page，可以调用
+释放与文件描述符fd相对应的打开文件对象。当一个进程终止时，内核会关闭其所有仍然打开着的文件。
+
+##### 更名及删除文件
+
+要重新命名或删除一个文件时，进程不需要打开它。实际上，这样的操作并没有对这个文件的内容起作用，而是对一个或多个目录的内容起作用。
 
 ```c
-unsigned long __get_free_pages(gfp_t gfp_mask, unsigned int order);
-```
-
-这个函数与alloc_pages()作用相同，不过它直接返回所请求的第一个页的逻辑地址。因为页是连续的，所以其他页也会紧随其后。
-
-如果只需一页，就可以用下面两个封装好的宏：
-
-```c
-#define alloc_page(gfp_mask) alloc_pages(gfp_mask, 0)
-#define __get_free_page(gfp_mask) __get_free_pages((gfp_mask), 0)
-
-```
-
-```c
-unsigned long get_zeroed_page(gfp_t gfp_mask);
-```
-
-这个函数与__get_free_pages()工作方式相同，只不过把分配好的页都填充成了0---字节中的每一位都要取消设置。如果分配的页是给用户空间的，这个函数就非常有用，会清除页中“随机地”包含的敏感数据。
-
-可以用下面的函数来释放页：
-
-```c
-void __free_pages(struct page *page, unsigned int order)
-void free_pages(unsigned long addr, unsigned int order);
-#define free_page(addr) free_pages((addr), 0)
-```
-
-释放页时要谨慎，只能释放属于自己的页。
-
-```c
-unsigned long page;
-page = __get_free_pages(GFP_KERNEL, 3);
-if(!page){
-    /*没有足够的内存*/
-  return -ENOMEM;
-}/*page指向8个物理页中的第1个页*/
-free_pages(page, 3);
-/*页现在已经释放，之后不应该再访问page中的地址*/
-
-```
-
-应该在程序开始之前就应该分配内存，会让错误处理得容易一些。
-
-当需要以页为单位的一族连续物理页时，这些低级函数很有用。对于常用的以字节为单位的分配来说，内核提供的函数是kmalloc()。
-
-### kmalloc()
-
-kmalloc()与用户空间的malloc()一族函数非常类似，只不过它多了一个flags参数。
-
-kmalloc()在<linux/slab_def.h>中声明：
-
-```c
-static __always_inline void *kmalloc(size_t size, gfp_t flags)
-```
-
-函数返回一个指向内存块的指针，其内存块至少要有size大小，所分配的内存区在物理上是连续的。
-
-gfp_mask标志分为三类：行为修饰符、区修饰符及类型。行为修饰符表示内核应当如何分配所需的内存。某些特定情况下，只能使用某些特定的方法分配内存。例如，中断处理程序就要求内核在分配内存过程中不能睡眠。区修饰符表示从哪儿分配内存。类型标志组合了行为修饰符和区修饰符，将各种可能遇到的组合归纳为不同的类型。
-
-- 行为修饰符。在<linux/gfp.h>中声明。
-
-  | 标志            | 描述                            |
-  | ------------- | ----------------------------- |
-  | __GFP_WAIT    | 分配器可以睡眠                       |
-  | __GFP_HIGH    | 分配器可以访问紧急事件缓冲池                |
-  | __GFP_IO      | 分配器可以启动磁盘I/O                  |
-  | __GFP_FS      | 分配器可以启动文件系统I/O                |
-  | __GFP_COLD    | 分配器应该使用高速缓存中快要淘汰出去的页          |
-  | __GFP_NOWARN  | 分配器将不打印失败警告                   |
-  | __GFP_REPEAT  | 分配器在分配失败时重复进行分配，但这次分配还存在失败的可能 |
-  | __GFP_NOFAIL  | 分配器将无限地重复分配，分配不能失败            |
-  | __GFP_NORETRY | 分配器分配失败时不会重新分配                |
-  | __GFP_COMP    | 添加混合页元数据，在hugetlb的代码          |
-
-- 区修饰符。内核优先从ZONE_NORMAL开始，这样可确保其他区在需要时有足够的空闲页。
-
-  | 标志            | 描述                          |
-  | ------------- | --------------------------- |
-  | __GFP_DMA     | 从ZONE_DMA分配                 |
-  | __GFP_DMA32   | 从ZONE_DMA32分配               |
-  | __GFP_HIGHMEM | 从ZONE_HIGHMEM或ZONE_NORMAL分配 |
-
-  不能给_get_free_pages()或kmalloc()指定ZONE_HIGHMEM，因为这两个函数返回的都是逻辑地址，而不是page结构，这两个函数分配的内存当前有可能还没有映射到内核的虚拟地址空间，因此，根本没有逻辑地址。只有alloc_pages()才能分配高端内存。
-
-- 类型标识。
-
-  | 标志           | 修饰符标志                                    | 描述                                       |
-  | ------------ | ---------------------------------------- | ---------------------------------------- |
-  | GFP_NOWAIT   | (\_\_GFP_ATOMIC & ~__GFP_HIGH)           | 类似GFP_ATOMIC，但是，调用不会退给紧急内存池。增加了内存分配失败的可能性。 |
-  | GFP_ATOMIC   | __GFP_HIGH                               | 用在中断处理程序、下半部、持有自旋锁以及其他不能睡眠的地方            |
-  | GFP_NOIO     | __GFP_WAIT                               | 可阻塞，但不会启动磁盘I/O。这个标志在不能引发更多磁盘I/O时能阻塞I/O代码，可能导致令人不快的递归 |
-  | GFP_NOFS     | (\_\_GFP_WAIT \| \_\_GFP_IO)             | 必要时可能引起阻塞，也可能启动磁盘I/O，但是不会启动文件系统操作。       |
-  | GFP_KERNEL   | (\_\_GFP_WAIT \| \_\_GFP_IO \| __GFP_FS) | 常规分配方式，可能会阻塞。在睡眠安全时用在进程上下文代码中。           |
-  | GFP_USER     | (\_\_GFP_WAIT \| \_\_GFP_IO \| \_\_GFP_FS \| \_\_GFP_HARDWALL) | 常规分配方式，可能会阻塞。用于为用户空间进程分配内存。              |
-  | GFP_HIGHUSER | (\_\_GFP_WAIT \| \_\_GFP_IO \| \_\_GFP_FS \| \_\_GFP_HARDWALL \| __GFP_HIGHMEM) | 从ZONE_HIGHMEM进行分配，可能会阻塞。用于为用户空间进程分配内存。   |
-  | GFP_DMA      | __GFP_DMA                                | 从ZONE_DMA进行分配。                           |
-
-  kmalloc()分配的内存用kfree()释放。
-
-### vmalloc()
-
-类似kmalloc()，不过vmalloc()分配的内存虚拟地址是连续的，而物理地址则无须连续。这也是用户空间分配函数的工作方式。malloc()返回的页在进程的虚拟空间是连续的，但并不保证在物理RAM中也是连续的。kmalloc()函数确保页在物理地址上是连续的（虚拟地址自然也是连续的）。vmalloc()函数通过分配非连续的物理块，再“修正”页表，把内存映射到逻辑空间的连续区域。
-
-出于性能考虑，kmalloc()比vmalloc()更合适。物理上不连续的页转换为虚拟地址空间上连续的页，必须专门建立页表项。糟糕的是，通过vmalloc()获得的页必须一个一个地进行映射，这就会导致比直接内存映射大的多的TLB抖动。vfree()释放分配的内存。
-
-### slab层
-
-分配和释放数据结构是内核中最普遍的操作之一。为了便于数据的频繁分配和回收，空闲链表是一个比较好的选择。当代码需要一个新的数据结构实例时，从空闲链表抓取，而不需要分配内存，当不需要这个数据结构实例时，就把它放回空闲链表，而不是释放它。从这个意义上说，空闲链表相当于对象高速缓存---快速存储频繁使用的对象类型。
-
-内核中，空闲链表面临的主要问题之一是不能全局控制。当可用内存变得紧缺时，内核无法通知每个空闲链表让其收缩缓存大小。实际上，内核根本不知道存在任何空闲链表。为弥补这一缺陷，且使代码更加稳固，Linux内核提供了slab层（slab分配器）。slab分配器扮演了通用数据结构缓存层角色。
-
-slab分配器试图在几个基本原则之间寻求一种平衡：
-
-- 频繁使用的数据结构也会频繁分配和释放，应当缓存它们
-- 频繁分配和回收必然会导致内存碎片。为避免，空闲链表的缓存会连续地存放。
-- 回收的对象可以立即投入下一次分配。
-- 如果分配器知道对象大小、页大小和总的高速缓存的大小这样的概念，它会做出更明智的决策。
-- 如果让部分缓存专属于单个处理器，那么，分配和释放就可以在不加SMP锁的情况下进行。
-- 分配器与NUMA相关，它可以从相同的内存节点为请求者进行分配。
-- 对存放的对象进行着色（color），以防止多个对象映射到相同的高速缓存行（cache line）。
-
-slab层把不同的对象划分为所谓高速缓存组，其中每个高速缓存组存放不同类型的对象。每种对象类型对应一个高速缓存。kmalloc()接口建立在slab层之上，使用了一组通用高速缓存。
-
-然后，这些高速缓存又被划分为slab(这也是这个子系统名字的来由)。slab由一个或多个物理上连续的页组成。一般情况下，slab也就仅仅由一页组成。每个高速缓存可以由多个slab组成。
-每个slab都包含一些对象成员，这里的对象指的是被缓存的数据结构。每个slab处于三种状态之一:满、部分满或空。当内核的某一部分需要一个新的对象时，先从部分满的slab中进行分配。如果没有部分满的slab,就从空的slab中进行分配。如果没有空的slab,就要创建一个slab。这种策略能减少碎片。
-
-![高速缓存、slab及对象之间的关系.png](https://github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/%E9%AB%98%E9%80%9F%E7%BC%93%E5%AD%98%E3%80%81slab%E5%8F%8A%E5%AF%B9%E8%B1%A1%E4%B9%8B%E9%97%B4%E7%9A%84%E5%85%B3%E7%B3%BB.png?raw=true)
-
-每个高速缓存都使用kmem_cache结构来表示。这个结构包含三个链表：slabs_full、slabs_partial和slabs_empty，均存放在kmem_list3结构内，该结构在mm/slab.c中定义。这些链表包含高速缓存中的所有slab，slab描述符struct slab用来描述每个slab：
-
-```C
-struct slab {
-	struct list_head list;
-	unsigned long colouroff;
-	void *s_mem;		/* including colour offset */
-	unsigned int inuse;	/* num of objs active in slab */
-	kmem_bufctl_t free;
-	unsigned short nodeid;
-};
-```
-
-如果slab很小，或者slab内部有足够的空间容纳slab描述符，那么描述符就放在slab里（slab自身开始的地方），否则就在slab另行分配。
-
-slab分配器可以创建新的slab：
-
-```c
-static void *kmem_getpages(struct kmem_cache *cachep, gfp_t flags, int nodeid)
-{
-	struct page *page;
-	int nr_pages;
-	int i;
-
-#ifndef CONFIG_MMU
-	flags |= __GFP_COMP;
-#endif
-
-	flags |= cachep->gfpflags;
-	if (cachep->flags & SLAB_RECLAIM_ACCOUNT)
-		flags |= __GFP_RECLAIMABLE;
-
-	page = alloc_pages_exact_node(nodeid, flags | __GFP_NOTRACK, cachep->gfporder);
-	if (!page)
-		return NULL;
-
-	nr_pages = (1 << cachep->gfporder);
-	if (cachep->flags & SLAB_RECLAIM_ACCOUNT)
-		add_zone_page_state(page_zone(page),
-			NR_SLAB_RECLAIMABLE, nr_pages);
-	else
-		add_zone_page_state(page_zone(page),
-			NR_SLAB_UNRECLAIMABLE, nr_pages);
-	for (i = 0; i < nr_pages; i++)
-		__SetPageSlab(page + i);
-
-	if (kmemcheck_enabled && !(cachep->flags & SLAB_NOTRACK)) {
-		kmemcheck_alloc_shadow(page, cachep->gfporder, flags, nodeid);
-
-		if (cachep->ctor)
-			kmemcheck_mark_uninitialized_pages(page, nr_pages);
-		else
-			kmemcheck_mark_unallocated_pages(page, nr_pages);
-	}
-
-	return page_address(page);
-}
-```
-
-nodeid非负时，分配器试图从相同的内存节点给发出的请求进行分配。
-
-利用kmem_freepages()释放内存。只有在下列情况下才会调用释放函数：当可用内存变得紧缺时，系统试图释放出更多内存以供使用；或者当高速缓存显示地被撤销时。
-
-```c
-struct kmem_cache *
-kmem_cache_create (const char *name, size_t size, size_t align,	unsigned long flags, void (*ctor)(void *))
-```
-
-此函数创建一个新的高速缓存。name 存放高速缓存的名字；size 是高速缓存中每个元素的大小；align 是slab内第一个对象的偏移，用来确保在业内进行特定的对齐，通常 0 就可以满足要求，也就是标准对齐；flags 是可选的设置项，用来控制高速缓存的行为，为 0 表示无特殊的行为，或者与以下标志中的一个或多个进行“或”运算：
-
-- SLAB_HWCACHE_ALIGN：slab层把一个slab内的所有对象按高速缓存行对齐。防止了“错误的共享”（两个或多个对象位于不同的内存对象，但映射到相同的高速缓存行）。提供性能，以空间换时间。
-- SLAB_POISON：slab层用已知的值（a5a5a5）填充slab，即所谓的“中毒”，有利于对未初始化内存的访问。
-- SLAB_RED_ZONE：slab层在已分配的内存周围插入“红色警戒区”以探测缓冲越界。
-- SLAB_PANIC：当分配失败时提醒slab层。这在要求分配只能成功时非常有用。
-- SLAB_CACHE_DMA：slab层使用可以执行DMA的内存给每个slab分配空间。只有在分配的对象用于DMA，而且必须驻留在ZONE_DMA区时才需要这个标志。
-
-最后一个参数ctor是高速缓存的构造函数。在新的页追加到高速缓存时，此函数才被调用。
-
-函数会睡眠。撤销一个高速缓存，调用：
-
-```C
-void kmem_cache_destroy(struct kmem_cache *cachep)
-```
-
-撤销函数通常在模块的注销代码中被调用。同样，也不能从中断上下文中调用这个函数，因为它也可能睡眠。调用该函数之前必须确保存在以下两个条件:1、高速缓存中的所有slab都必须为空。2、在调用kmem_cache_destroy过程中(更不用说在调用之后了)不再访问这个高速缓存。调用者必须确保这种同步。
-
-```C
-/*从缓存中分配*/
-void *kmem_cache_alloc(struct kmem_cache *cachep, gfp_t flags)
-/*释放*/
-void kmem_cache_free(struct kmem_cache *cachep, void *objp)
-```
-
-```C
-/*ARP相关 创建、分配、释放*/
-tbl->kmem_cachep =
-			kmem_cache_create(tbl->id, tbl->entry_size, 0,
-					  SLAB_HWCACHE_ALIGN|SLAB_PANIC,
-					  NULL);
-n = kmem_cache_zalloc(tbl->kmem_cachep, GFP_ATOMIC);
-kmem_cache_free(neigh->tbl->kmem_cachep, neigh);
-```
-
-### 在栈上的静态分配
-
-用户空间能够奢侈地负担起非常大的栈，而且栈空间还可以动态增长，相反，内核却不能这么奢侈---内核栈小且固定。当给每个进程分配一个固定大小的小栈后，不但可以减少内存的消耗，而且内核页无须负担太重的管理任务。
-
-每个进程的内核栈大小既依赖体系结构，也与编译时的选项有关。历史上，每个进程都有两页的内核栈。因为32位和64位体系结构的页面大小分别是4KB和8KB，所以通常它们的内核栈的大小分别是8KB和16KB。但是，在2.6系列内核的早期，引入了一个选项设置单页内核栈。当激活这个选项时，每个进程的内核栈只有一页那么大，根据体系结构的不同，或为4KB,或为8KB。这样做出于两个原因：首先，可以让每个进程减少内存消耗。其次，也是最重要的，随着机器运行时间的增加，寻找两个未分配的、连续的页变得越来越困难。物理内存渐渐变为碎片，因此，给一个新进程分配虚拟内存(vM)的压力也在增大。
-
-还有一个更复杂的原因每个进程的整个调用链必须放在自己的内核栈中。不过，中断处理程序也曾经使用它们所中断的进程的内核栈，这样，中断处理程序也要放在内核栈中。这当然有效而简单，但是，这同时会把更严格的约束条件加在这可怜的内核栈上。当我们转而使用只有一个页面的内核栈时，中断处理程序就不放在栈中了。
-
-为了矫正这个问题，内核开发者们实现了一个新功能:中断栈。中断栈为每个进程提供一个用干中断处理程序的栈。有了这个选项，中断处理程序不用再和被中断进程共享一个内核栈，它们可以使用自己的栈了。对每个进程来说仅仅耗费了一页而已。
-
-总的来说，内核栈可以是1页，也可以是2页，这取决于编译时配置选项。栈大小因此在4~16KB的范围内。历史上，中断处理程序和被中断进程共享一个栈。当1页栈的选项激活时中断处理程序获得了自己的栈。在任何情况下，无限制的递归和alloc()显然是不被允许的。
-
-### 高端内存的映射
-
-根据定义，在高端内存中的页不能永久地映射到内核地址空间上。因此，通过alloc_pages()函数以__GFP_HIGHMEM标志获得的页不可能有逻辑地址。
-
-在x86体系结构上，高于896MB的所有物理内存的范围大都是高端内存，它并不会永久地或自动地映射到内核地址空间，尽管X86处理器能够寻址物理RAM的范围达到4GB（启用PAE可以寻址到64GB）。一旦这些页被分配，就必须映射到内核的逻辑地址空间上。在x86上，高端内存中的页被映射到3GB-4GB。
-
-```c
-void *kmap(struct page *page)
-```
-
-永久映射一个给定的page结构到内核地址空间，定义在文件<linux/highmem.h>中。此函数在高端内存或低端内存上都能用。如果page结构对应的是低端内存中的一页，函数只会单纯地返回该页的虚拟地址。如果页位于高端内存，则会建立一个永久映射，再返回地址。这个函数可以睡眠，因此只能用在进程上下文中。由于允许永久映射的数量是有限的(如果没有这个限制，就不必搞得这么复杂，把所有内存通通映射为永久内存就行了)，当不再需要高端内存时，应该解除映射，可通过下列函数完成:
-
-```c
-void kunmap(struct page *page)
+/*改变了文件链接的名字*/
+res= rename(oldpath, newpath);
 ```
 
 ```c
-void *kmap_atomic(struct page *page, enum km_type type)
+/*减少了文件链接数，删除了相应的目录项。只有当链接数为0时，文件才被真正删除。*/
+res= unlink(pathname);
 ```
 
-临时映射，不可睡眠。内核原子地把高端内存中的一个页映射到某个保留的映射中。参数type是下列枚举之一，描述了临时映射的目的。定义于<asm/kmap_types.h>中：
+### Unix 内核概述
 
-```c
-enum km_type {
-	KM_BOUNCE_READ,
-  	/*SKB相关，网卡地址映射到vm，之后进行数据拷贝*/
-	KM_SKB_SUNRPC_DATA,
-	KM_SKB_DATA_SOFTIRQ,
-	KM_USER0,
-	KM_USER1,
-	KM_BIO_SRC_IRQ,
-	KM_BIO_DST_IRQ,
-	KM_PTE0,
-	KM_PTE1,
-	KM_IRQ0,
-	KM_IRQ1,
-	KM_SOFTIRQ0,
-	KM_SOFTIRQ1,
-	KM_PPC_SYNC_PAGE,
-	KM_PPC_SYNC_ICACHE,
-	KM_KDB,
-	KM_TYPE_NR
-};
+Unix内核提供了应用程序可以运行的执行环境。因此，内核必须实现一组服务及相应的接口。应用程序使用这些接口，而且通常不会与硬件资源直接交互。
+
+#### 进程/内核模式
+
+CPU既可以运行在用户态下，也可以运行在内核态下。实际上，一些CPU可以有两种以上的执行状态。例如，Intel 80x86微处理器有四种不同的执行状态。但是，所有标准的Unix内核都仅仅利用了内核态和用户态。
+
+当一个程序在用户态下执行时，它不能直接访问内核数据结构或内核的程序。然而，当应用程序在内核态下运行时，这些限制不再有效。每种CPU模型都为从用户态到内核态的转换提供了特殊的指令，反之亦然。一个程序执行时，大部分时间都处在用户态下，只有需要内核所提供的服务时才切换到内核态。当内核满足了用户程序的请求后，它让程序又回到用户态下。
+
+进程是动态的实体，在系统内通常只有有限的生存期。创建、撤消及同步现有进程的任务都委托给内核中的一组例程来完成。
+
+内核本身并不是一个进程，而是进程的管理者。进程/内核模式假定：请求内核服务的进程使用所谓系统调用(system call)的特殊编程机制。每个系统调用都设置了一组识别进程请求的参数，然后执行与硬件相关的CPU指令完成从用户态到内核态的转换。
+
+除用户进程之外，Unix系统还包括几个所谓内核线程(kernel thread)的特权进程(被赋予特殊权限的进程)，它们具有以下特点：
+
+- 以内核态运行在内核地址空间。
+- 不与用户直接交互，因此不需要终端设备。
+- 通常在系统启动时创建，然后一直处于活跃状态直到系统关闭。
+
+在单处理器系统中，任何时候只有一个进程在运行，或处于用户态，或处于内核态。如果进程运行在内核态，处理器就执行一些内核例程。
+
+Unix内核做的工作远不止处理系统调用。实际上，可以有几种方式激活内核例程：
+
+- 进程调用系统调用。
+- 正在执行进程的CPU发出一个异常(exception)信号，异常是一些反常情况，例如一个无效的指令。内核代表产生异常的进程处理异常。
+- 外围设备向CPU发出一个中断(interrupt)信号以通知一个事件的发生，如一个要 求注意的请求、一个状态的变化或一个I/O操作已经完成等。每个中断信号都是由内核中的中断处理程序(interrupt handler)来处理的。因为外围设备与CPU异步操作，因此，中断在不可预知的时间发生。
+- 内核线程被执行。因为内核线程运行在内核态，因此必须认为其相应程序是内核的一部分。
+
+#### 进程实现
+
+为了让内核管理进程，每个进程由一个进程描述符(process descriptor)表示，这个描述符包含有关进程当前状态的信息。
+当内核暂停一个进程的执行时，就把几个相关处理器寄存器的内容保存在进程描述符中。这些寄存器包括：
+
+- 程序计数器(PC) 和 栈指针(SP)寄存器
+- 通用寄存器
+- 浮点寄存器
+- 包含CPU状态信息的处理器控制寄存器(处理器状态字，Processor Status Word)
+- 用来跟踪进程对RAM访问的内存管理寄存器
+
+当内核决定恢复执行一个进程时，它用进程描述符中合适的字段来装载CPU寄存器。因为程序计数器中所存的值指向下一条将要执行的指令，所以进程从它停止的地方恢复执行。
+
+当一个进程不在CPU上执行时，它正在等待某一事件。Unix内核可以区分很多等待状态，这些等待状态通常由进程描述符队列实现。每个(可能为空)队列对应一组等待特定事件的进程。
+
+#### 可重入内核
+
+所有的Unix内核都是可重入的(reentrant)，这意味着若干个进程可以同时在内核态下执行。当然，在单处理器系统上只有一个进程在真正运行，但是有许多进程可能在等待CPU或某一I/O操作完成时在内核态下被阻塞。例如，当内核代表某一进程发出一个读磁盘请求后，就让磁盘控制器处理这个请求并且恢复执行其他进程。当设备满足了读请求时，有一个中断就会通知内核，从而以前的进程可以恢复执行。
+
+提供可重入的一种方式是编写函数，以便这些函数只能修改局部变量，而不能改变全局数据结构，这样的函数叫可重入函数。但是可重入内核不仅仅局限于这样的可重入函数(尽管一些实时内核正是如此实现的)。相反，可重入内核可以包含非重入函数，并且利用锁机制保证一次只有一个进程执行一个非重人函数。
+
+如果一个硬件中断发生，可重入内核能挂起当前正在执行的进程，即使这个进程处于内核态。这种能力是非常重要的，因为这能提高发出中断的设备控制器的吞吐量。一旦设备已发出一个中断，它就一直等待直到CPU应答它为止。如果内核能够快速应答，设备控制器在CPU处理中断时就能执行其他任务。
+
+现在，让我们看一下内核的可重入性及它对内核组织的影响。内核控制路径(kernel control path)表示内核处理系统调用、异常或中断所执行的指令序列。在最简单的情况下，CPU从第一条指令到最后一条指令顺序地执行内核控制路径。然而，当下述事件之一发生时，CPU交错执行内核控制路径：
+
+- 运行在用户态下的进程调用一个系统调用，而相应的内核控制路径证实这个请求无法立即得到满足，然后，内核控制路径调用调度程序选择一个新的进程投入运行。结果，进程切换发生。第一个内核控制路径还没完成，而CPU又重新开始执行其他的内核控制路径。在这种情况下，两条控制路径代表两个不同的进程在执行。
+- 当运行一个内核控制路径时，CPU检测到一个异常(例如，访问一个不在RAM中的页)。第一个控制路径被挂起，而CPU开始执行合适的过程。在我们的例子中，这种过程能给进程分配一个新页，并从磁盘读它的内容。当这个过程结束时，第一个控制路径可以恢复执行。在这种情况下，两个控制路径代表同一个进程在执行。
+- 当CPU正在运行一个启用了中断的内核控制路径时，一个硬件中断发生。第一个内核控制路径还没执行完，CPU开始执行另一个内核控制路径来处理这个中断。当这个中断处理程序终止时，第一个内核控制路径恢复。在这种情况下，两个内核控制路径运行在同一进程的可执行上下文中，所花费的系统CPU时间都算给这个进程。然而，中断处理程序无需代表这个进程运行。
+- 在支持抢占式调度的内核中，CPU正在运行，而一个更高优先级的进程加入就绪队列，则中断发生。在这种情况下，第一个内核控制路径还没有执行完，CPU代表高优先级进程又开始执行另一个内核控制路径。只有把内核编译成支持抢占式调度之后，才可能出现这种情况。
+
+下图显示了非交错的和交错的内核控制路径的几个例子。考虑以下三种不同的CPU状态：
+
+- 在用户态下运行一个进程(User)
+- 运行一个异常处理程序或系统调用处理程序(Excp)
+- 运行一个中断处理程序(Intr)
+
+![内核控制路径交错执行.jpg](https://github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/%E5%86%85%E6%A0%B8%E6%8E%A7%E5%88%B6%E8%B7%AF%E5%BE%84%E4%BA%A4%E9%94%99%E6%89%A7%E8%A1%8C.jpg?raw=true)
+
+#### 进程地址空间
+
+每个进程运行在它的私有地址空间。在用户态下运行的进程涉及到私有栈、数据区和代码区。当在内核态运行时，进程访问内核的数据区和代码区，但使用另外的私有栈。
+
+因为内核是可重入的，因此几个内核控制路径(每个都与不同的进程相关)可以轮流执行。在这种情况下，每个内核控制路径都引用它自己的私有内核栈。
+
+尽管看起来每个进程访问一个私有地址空间，但有时进程之间也共享部分地址空间。在一些情况下，这种共享由进程显式地提出；在另外一些情况下，由内核自动完成共享以节约内存。
+
+如果同一个程序(比如说编辑程序)由几个用户同时使用，则这个程序只被装人内存一次，其指令由所有需要它的用户共享。当然，其数据不被共享，因为每个用户将有独立的数据。这种共享的地址空间由内核自动完成以节省内存。
+
+进程间也能共享部分地址空间，以实现一种进程间通信，这就是由System V引人并且已经被Linux支持的“共享内存”技术。
+最后，Linux支持mmap()系统调用，该系统调用允许存放在块设备上的文件或信息的一部分映射到进程的部分地址空间。内存映射为正常的读写传送数据方式提供了另一种选择。如果同一文件由几个进程共享，那么共享它的每个进程地址空间都包含有它的内存映射。
+
+#### 同步和临界区
+
+实现可重入内核需要利用同步机制：如果内核控制路径对某个内核数据结构进行操作时被挂起，那么，其他的内核控制路径就不应当再对该数据结构进行操作，除非它已被重新设置成一致性(consistent)状态。否则，两个控制路径的交互作用将破坏所存储的信息。
+
+当某个计算结果取决于如何调度两个或多个进程时，相关代码就是不正确的。我们说存在一种竟争条件(race condition)。
+一般来说，对全局变量的安全访问通过原子操作(atomic operation)来保证。临界区(critical region)是这样的一段代码，进入这段代码的进程必须完成，之后另一个进程才能进入。
+
+这些问题不仅出现在内核控制路径之间，也出现在共享公共数据的进程之间。几种同步技术已经被采用。以下将集中讨论怎样同步内核控制路径。
+
+##### 非抢占式内核
+
+在寻找彻底、简单地解决同步问题的方案中，大多数传统的Unix内核都是非抢占式的：当进程在内核态执行时，它不能被任意挂起，也不能被另一个进程代替。因此，在单处理器系统上，中断或异常处理程序不能修改的所有内核数据结构，内核对它们的访问都是安全的。
+
+当然，内核态的进程能自愿放弃CPU，但是在这种情况下，它必须确保所有的数据结构都处于一致性状态。此外，当这种进程恢复执行时，它必须重新检查以前访问过的数据结构的值，因为这些数据结构有可能被改变。
+
+如果内核支持抢占，那么在应用同步机制时，确保进入临界区前禁止抢占，退出临界区时启用抢占。
+
+非抢占能力在多处理器系统上是低效的，因为运行在不同CPU上的两个内核控制路径本可以并发地访问相同的数据结构。
+禁止中断单处理器系统上的另一种同步机制是：在进入一个临界区之前禁止所有硬件中断，离开时再重新启用中断。这种机制尽管简单，但远不是最佳的。如果临界区比较大，那么在一个相对较长的时间内持续禁止中断就可能使所有的硬件活动处于冻结状态。
+
+此外，由于在多处理器系统中禁止本地CPU上的中断是不够的，所以必须使用其他的同步技术。
+
+##### 信号量
+
+广泛使用的一种机制是信号量(semaphore)，它在单处理器系统和多处理器系统上都有效。信号量仅仅是与一个数据结构相关的计数器。所有内核线程在试图访问这个数据结构之前，都要检查这个信号量。可以把每个信号量看成一个对象，其组成如下：
+
+- 一个整数变量
+- 一个等待进程的链表
+- 两个原子方法:down()和up()
+
+down()方法对信号量的值减1，如果这个新值小于0，该方法就把正在运行的进程加入到这个信号量链表，然后阻塞该进程(即调用调度程序)。up()方法对信号量的值加1,如果这个新值大于或等于0，则激活这个信号量链表中的一个或多个进程。
+
+每个要保护的数据结构都有它自己的信号量，其初始值为1。当内核控制路径希望访问这个数据结构时，它在相应的信号量上执行down()方法。如果信号量的当前值不是负数，则允许访问这个数据结构。否则，把执行内核控制路径的进程加入到这个信号量的链表并阻塞该进程。当另一个进程在那个信号量上执行up()方法时，允许信号量链表上的一个进程继续执行。
+
+##### 自旋锁
+
+在多处理器系统中，信号量并不总是解决同步问题的最佳方案。系统不允许在不同CPU上运行的内核控制路径同时访问某些内核数据结构，在这种情况下，如果修改数据结构所需的时间比较短，那么，信号量可能是很低效的。为了检查信号量，内核必须把进程插入到信号量链表中，然后挂起它。因为这两种操作比较费时，完成这些操作时，其他的内核控制路径可能已经释放了信号量。在这些情况下，多处理器操作系统使用了自旋锁(spin lock)。自旋锁与信号量非常相似，但没有进程链表。当一个进程发现锁被另一个进程锁着时，它就不停地“旋转”，执行一个紧凑的循环指令直到锁打开。
+
+当然，自旋锁在单处理器环境下是无效的。当内核控制路径试图访问一个上锁的数据结构时，它开始无休止循环。因此，内核控制路径可能因为正在修改受保护的数据结构而没有机会继续执行，也没有机会释放这个自旋锁。最后的结果可能是系统挂起。
+
+##### 避免死锁
+
+与其他控制路径同步的进程或内核控制路径很容易进入死锁(deadlock)状态。
+
+只要涉及到内核设计，当所用内核信号量的数量较多时，死锁就成为一个突出问题。在这种情况下，很难保证内核控制路径在各种可能方式下的交错执行不出现死锁状态。有几种操作系统(包括Linux)通过按规定的顺序请求信号量来避免死锁。
+
+#### 信号和进程间通信
+
+Unix信号(signal)提供了把系统事件报告给进程的一种机制。每种事件都有自己的信号编号，通常用一个符号常量来表示，例如SIGTERM。有两种系统事件：
+
+- 异步通告
+
+  例如，当用户在终端按下中断键(通常为CTRL-C)时，即向前台进程发出中断信号SIGINT。
+
+- 同步错误或异常
+
+  例如，当进程访问内存非法地址时，内核向这个进程发送一个SIGSEGV信号。
+
+POSIX标准定义了大约20种不同的信号，其中，有两种是用户自定义的，可以当作用户态下进程通信和同步的原语机制。一般来说，进程可以以两种方式对接收到的信号做出反应：
+
+- 忽略该信号。
+
+- 异步地执行一个指定的过程(信号处理程序)。
+
+如果进程不指定选择何种方式，内核就根据信号的编号执行一个默认操作。五种可能的默认操作是：
+
+- 终止进程。
+
+- 将执行上下文和进程地址空间的内容写入一个文件(核心转储，core dump)，并终止进程。
+- 忽略信号。
+- 挂起进程。
+- 如果进程曾被暂停，则恢复它的执行。
+
+因为POSIX语义允许进程暂时阻塞信号，因此内核信号的处理相当精细。此外，SIGKILL和SIGSTOP信号不能直接由进程处理，也不能由进程忽略。
+
+AT&T的Unix System V引入了在用户态下其他种类的进程间通信机制，很多Unix内核也采用了这些机制：信号量、消息队列及共享内存。它们被统称为System V lPC。
+
+内核把它们作为IPC资源来实现：进程要获得一个资源，可以调用shmget(),semget()或msgget()系统调用。与文件一样，IPC资源是持久不变的，进程创建者、进程拥有者或超级用户进程必须显式地释放这些资源。
+
+这里的信号量与本章“同步和临界区”一节中所描述的信号量是相似的，只是它们用在用户态下的进程中。消息队列允许进程利用msgsnd()及msgget()系统调用交换消息，msgsnd()表示把消息插入到指定的队列中，msgget()表示从队列中提取消息。
+
+POSIX标准(IEEE Std 1003.1-2001)定义了一种基于消息队列的IPC机制，这就是所谓的POSIX消息队列。它们和System V IPC消息队列是相似的，但是，它们对应用程序提供一个更简单的基于文件的接口。
+
+共享内存为进程之间交换和共享数据提供了最快的方式。通过调用shmget()系统调用来创建一个新的共享内存，其大小按需设置。在获得IPC资源标识符后，进程调用shmat()系统调用，其返回值是进程的地址空间中新区域的起始地址。当进程希望把共享内存从其地址空间分离出去时，就调用shmdt()系统调用。共享内存的实现依赖于内核对进程地址空间的实现。
+
+#### 进程管理
+
+Unix在进程和它正在执行的程序之间做出一个清晰的划分。fork()和_exit()系统调用分别用来创建一个新进程和终止一个进程，而调用exec()类系统调用则是装入一个新程序。当这样一个系统调用执行以后，进程就在所装入程序的全新地址空间恢复运行。
+
+调用fork()的进程是父进程，而新进程是它的子进程。父子进程能互相找到对方，因为进程描述符包含有两个指针，一个直接指向它的父进程，另一个直接指向它的子进程。
+
+实现fork()一种简单的方式就是将父进程的数据与代码都复制，并把这个拷贝赋予子进程。这会相当费时。当前依赖硬件分页单元的内核采用写时复制(Copy-On-Write)技术，即把页的复制延迟到最后一刻(也就是说，直到父或子进程需要时才写进页)。
+
+_exit()系统调用终止一个进程。内核对这个系统调用的处理是通过释放进程所拥有的资源并向父进程发送SIGCHILD信号(默认操作为忽略)来实现的。
+
+##### 任死进程(zombie process)
+
+父进程如何查询其子进程是否终止了呢?wait4()系统调用允许进程等待，直到其中的一个子进程结束.它返回已终止子进程的进程标识符(Process ID,  PID)。
+
+内核在执行这个系统调用时，检查子进程是否已经终止。引入僵死进程的特殊状态是为了表示终止的进程：父进程执行完wait4()系统调用之前，进程就一直停留在那种状态。系统调用处理程序从进程描述符字段中获取有关资源使用的一些数据；一旦得到数据，就可以释放进程描述符。当进程执行wait4()系统调用时如果没有子进程结束，内核就通常把该进程设置成等待状态，一直到子进程结束。
+
+很多内核也实现了waitpid()系统调用，它允许进程等待一个特殊的子进程。其他wait4()系统调用的变体也是相当通用的。
+在父进程发出wait4()调用之前，让内核保存子进程的有关信息是一个良好的习惯，但是，假设父进程终止而没有发出wait4()调用呢?这些信息占用了一些内存中非常有用的位置，而这些位置本来可以用来为活动着的进程提供服务。例如，很多shell允许用户在后台启动一个命令然后退出。正在运行这个shell命令的进程终止，但它的子进程继续运行。
+
+解决的办法是使用一个名为init的特殊系统进程，它在系统初始化的时候被创建。当一个进程终止时，内核改变其所有现有子进程的进程描述符指针，使这些子进程成为init的孩子。init监控所有子进程的执行，并且按常规发布wait4()系统调用，其副作用就是除掉所有僵死的进程。
+
+##### 进程组和登录会话
+
+现代Unix操作系统引入了进程组(process group)的概念，以表示一种“作业(job)"的抽象。例如，为了执行命令行：
+
+```shell
+ls | sort | mort
 ```
 
-此函数可用在中断上下文和其他不能重新调度的地方。它也禁止内核抢占，因为映射对每个处理器都是唯一的（调度可能对哪个处理器执行哪个进程做变动）。可通过下面的函数取消映射：
 
-```c
-void kunmap_atomic(void *kvaddr, enum km_type type)
-```
+Shell支持进程组，例如bash，为三个相应的进程ls,sort及more创建了一个新的组。shell以这种方式作用于这三个进程，就好像它们是一个单独的实体(更准确地说是作业)。每个进程描述符包括一个包含进程组ID的字段。每一进程组可以有一个领头进程(即其PID与这个进程组的ID相同的进程)。新创建的进程最初被插入到其父进程的进程组中。
 
-下一个临时映射可自动覆盖前一个映射，此函数可不调用。
+现代Unix内核也引入了登录会话(login session)。非正式地说，一个登录会话包含在指定终端已经开始工作会话的那个进程的所有后代进程——通常情况下，登录会话就是shell进程为用户创建的第一条命令。进程组中的所有进程必须在同一登录会话中。一个登录会话可以让几个进程组同时处于活动状态，其中，只有一个进程组一直处于前台，这意味着该进程组可以访问终端，而其他活动着的进程组在后台。当一个后台进程试图访问终端时，它将收到SIGTTIN或SIGTTOUT信号。在很多shell命令中，用内部命令bg和fg把一个进程组放在后台或者前台。
 
-### 每个CPU的分配
+#### 内存管理
 
-支持SMP的现代操作系统使用每个CPU上的数据，对于给定的处理器其数据是唯一的。一般来说，每个CPU的数据存放在一个数组中。数组中的每一项对应着系统上一个存在的处理器。按当前处理器号确定这个数组的当前元素。可声明如下：
+内存管理是迄今为止Unix内核中最复杂的活动。
 
-```c
-unsigned long my_percpu[NR_CPUS];
-```
+##### 虚拟内存
 
-然后，按如下方式访问：
+所有新近的Unix系统都提供了一种有用的抽象，叫虚拟内存(virtual memory)。虚拟内存作为一种逻辑层，处于应用程序的内存请求与硬件内存管理单元(Memory Management Unit,  MMU)之间。虚拟内存有很多用途和优点：
 
-```c
-int cpu;
-cpu = get_cpu();
-my_percpu(cpu)++;
-printk("my_percpu on cpu=%d is %lu\n",cpu, my_percpu(cpu));
-put_cpu();
-```
+- 若干个进程可以并发地执行。
+- 应用程序所需内存大于可用物理内存时也可以运行。
+- 程序只有部分代码装入内存时进程可以执行它。
+- 允许每个进程访问可用物理内存的子集。
+- 进程可以共享库函数或程序的一个单独内存映像。
+- 程序是可重定位的，也就是说，可以把程序放在物理内存的任何地方。
+- 程序员可以编写与机器无关的代码，因为他们不必关心有关物理内存的组织结构。
 
-注意，上面的代码中并没有出现锁，这是因为所操作的数据对当前处理器来说是唯一的。
+虚拟内存子系统的主要成分是虚拟地址空间(virtual address space)的概念。进程所用的一组内存地址不同于物理内存地址。当进程使用一个虚拟地址时，内核和MMU协同定位其在内存中的实际物理位置。
 
-现在，内核抢占成为了唯一需要关注的问题，内核抢占会引起下面提到的两个问题：
+现在的CPU包含了能自动把虚拟地址转换成物理地址的硬件电路。为了达到这个目标，把可用RAM划分成长度为4KB或8KB的页框(page frame)，并且引入一组页表来指定虚拟地址与物理地址之间的对应关系。这些电路使内存分配变得简单，因为一块连续的虚拟地址请求可以通过分配一组非连续的物理地址页框而得到满足。
 
-- 如果你的代码被其他处理器抢占并重新调度，那么这时CPU变量就会无效，因为它指向的是错误的处理器(通常，代码获得当前处理器后是不可以睡眠的)。
-- 如果另一个任务抢占了你的代码，那么有可能在同一个处理器上发生并发访问my_percpu的情况，显然这属于一个竞争条件。
+##### 随机访问存储器(RAM)的使用
 
-调用get_cpu()时，就已经禁止了内核抢占。相应的在调用put_cpu()时又会重新激活当前处理器号。注意，只要你总使用上述方法来保护数据安全，那么，内核抢占就不需要你自己去禁止。
+所有的Unix操作系统都将RAM毫无疑义地划分为两部分，其中若干兆字节专门用于存放内核映像(也就是内核代码和内核静态数据结构)。RAM的其余部分通常由虚拟内存系统来处理，并且用在以下三种可能的方面：
 
-### 新的每个CPU的分配
+- 满足内核对缓冲区、描述符及其他动态内核数据结构的请求。
+- 满足进程对一般内存区的请求及对文件内存映射的请求。
+- 借助于高速缓存从磁盘及其他缓冲设备获得较好的性能。
 
-2.6内核为了方便创建和操作每个CPU数据，而引进了新的操作接口，称作percpu。头文件<linux/percpu.h>声明了所有的接口操作例程，可以在文件<mm/slab.c>和<asm/percpu.h>中找到它们的定义。
+每种请求类型都是重要的。但从另一方面来说，因为可用RAM是有限的，所以必须在请求类型之间做出平衡，尤其是当可用内存没有剩下多少时。此外，当可用内存达到临界阈值时，可以调用页框回收(page-frame-reclaiming)算法释放其他内存。
 
-在编译时定义每个CPU：
+虚拟内存系统必须解决的一个主要问题是内存碎片。理想情况下，只有当空闲页框数太少时，内存请求才失败。然而，通常要求内核使用物理上连续的内存区域，因此，即使有足够的可用内存，但它不能作为一个连续的大块使用时，内存的请求也会失败。
 
-```c
-DEFINE_PER_CPU(type, name);
-```
+##### 内核内存分配器
 
-这个语句为系统中的每一个处理器都创建了一个类型为type，名字为name的变量实例，如果需要在别处声明变量，以防编译时警告，则：
+内核内存分配器(Kernel Memory Allocator, KMA)是一个子系统，它试图满足系统中所有部分对内存的请求。其中一些请求来自内核其他子系统，它们需要一些内核使用的内存，还有一些请求来自于用户程序的系统调用，用来增加用户进程的地址空间。一个好的KMA应该具有下列特点：
 
-```c
-DECLARE_PER_CPU(type, name);
-```
+- 必须快。实际上，这是最重要的属性，因为它由所有的内核子系统(包括中断处理程序)调用。
+- 必须把内存的浪费减到最少。
+- 必须努力减轻内存的碎片(fragmentation)问题。
+- 必须能与其他内存管理子系统合作，以便借用和释放页框。
 
-```c
-get_cpu_var(name)++;/*增加该处理器上的name值，并禁止抢占*/
-put_cpu_var(name);/*完成，重新激活内核抢占*/
-per_cpu(name, cpu)++;/*增加指定处理器上的name变量的值，不会禁止抢占，也不会提供任何形式的锁保护*/
-```
+基于各种不同的算法技术，已经提出了几种KMA，包括：
 
-这些编译时每个CPU数据的例子并不能在模块内使用，因为连接程序实际上将它们创建在一个唯一的可执行段中（.data.percpu）。需要从模块中访问，则需要动态创建这些数据。
+- 资源图分配算法(allocator)
 
-内核实现每个CPU数据的动态分配方法类似于kmalloc()。
+- 2的幕次方空闲链表
+- McKusick-Karels分配算法
+- 伙伴(Buddy)系统
+- Mach的区域(Zone)分配算法
+- Dynix分配算法
+- Solaris的Slab分配算法
 
-```C
-/*原型在<linux/percpu.h>*/
-#define alloc_percpu(type)	\
-	(typeof(type) __percpu *)__alloc_percpu(sizeof(type), __alignof__(type))
-void __percpu *__alloc_percpu(size_t size, size_t align)
-void free_percpu(void __percpu *__pdata)
-```
+Linux的KMA在伙伴系统之上采用了Slab分配算法。
 
-alloc_percpu()给系统中的每个处理器分配一个指定类型对象的实例。是对__alloc_percpu()的封装（size 要分配的实际字节数，align 按多少字节对齐）。封装后按单字节对齐。
+##### 进程虚拟地址空间处理
 
-\__alignof__是gcc的一个功能，返回指定类型或value所需（或建议的，某些古怪的体系结构并没有字节对齐的要求）的对齐字节数。语义和sizeof一样。若指定value，那么将返回value的最大对齐字节数。
+进程的虚拟地址空间包括了进程可以引用的所有虚拟内存地址。内核通常用一组内存区描述符描述进程虚拟地址空间。例如，当进程通过exec()类系统调用开始某个程序的执行时，内核分配给进程的虚拟地址空间由以下内存区组成：
 
-动态创建时返回一个指针，用来间接引用每个CPU数据：
+- 程序的可执行代码
+- 程序的初始化数据
+- 程序的未初始化数据
+- 初始程序栈(即用户态栈)
+- 所需共享库的可执行代码和数据
+- 堆(由程序动态请求的内存)
 
-```c
-get_cpu_var(ptr);/*会禁止内核抢占*/
-put_cpu_var(ptr);
-```
+所有现代Unix操作系统都采用了所谓请求调页(demand paging)的内存分配策略。有了请求调页，进程可以在它的页还没有在内存时就开始执行。当进程访问一个不存在的页时，MMU产生一个异常；异常处理程序找到受影响的内存区，分配一个空闲的页，并用适当的数据把它初始化。同理，当进程通过调用malloc()或brk()(由malloc()在内部调用)系统调用动态地请求内存时，内核仅仅修改进程的堆内存区的大小。只有试图引用进程的虚拟内存地址而产生异常时，才给进程分配页框。虚拟地址空间也采用其他更有效的策略，如前面提到的写时复制策略。例如，当一个新进程被创建时，内核仅仅把父进程的页框赋给子进程的地址空间，但是把这些页框标记为只读。一旦父或子进程试图修改页中的内容时，一个异常就会产生。异常处理程序把新页框赋给受影响的进程，并用原来页中的内容初始化新页框。
 
-### 使用每个CPU数据的原因
+##### 高速缓存
 
-首先是减少了数据锁定。因为按照每个处理器访问每个CPU数据的逻辑，你可以不再需要任何锁。“只有这个处理器能访问这个数据”的规则纯粹是一个编程约定。编程者需要确保本地处理器只会访问它自己的唯一数据。系统本身并不存在任何措施禁止你从事欺骗活动。
+物理内存的一大优势就是用作磁盘和其他块设备的高速缓存。这是因为硬盘非常慢：磁盘的访问需要数毫秒，与RAM的访问时间相比，这太长了。因此，磁盘通常是影响系统性能的瓶颈。通常，在最早的Unix系统中就已经实现的一个策略是：尽可能地推迟写磁盘的时间，因此，从磁盘读入内存的数据即使任何进程都不再使用它们，它们也继续留在RAM中。
+这一策略的前题是有好机会摆在面前：新进程请求从磁盘读或写的数据，就是被撤消进程曾拥有的数据。当一个进程请求访问磁盘时，内核首先检查进程请求的数据是否在缓存中，如果在(把这种情况叫做缓存命中)，内核就可以为进程请求提供服务而不用访问磁盘。
 
-第二个好处是使用每个CPU数据可以大大减少缓存失效。失效发生在处理器试图使它们的缓存保持同步时。如果一个处理器操作某个数据，而该数据又存放在其他处理器缓存中，那么存放该数据的那个处理器必须清理或刷新自己的缓存。持续不断的缓存失效称为缓存抖动，这样对系统性能影响颇大。使用每个CPU数据将使得缓存影响降至最低，因为理想情况下只会访问自己的数据。percpu接口缓存一对齐（cache-align）所有数据，以便确保在访问一个处理器的数据时，不会将另一个处理器的数据带入同一个缓存线上。
+sync()系统调用把所有“脏”的缓冲区(即缓冲区的内容与对应磁盘块的内容不一样)写入磁盘来强制磁盘同步。为了避免数据丢失，所有的操作系统都会注意周期性地把脏缓冲区写回磁盘。
 
-综上所述，使用每个CPU数据会省去许多〔或最小化)数据上锁，它唯一的安全要求就是要禁止内核抢占。而这点代价相比上锁要小得多，而且接口会自动帮你完成这个步骤。每个CPU数据在中断上下文或进程上下文中使用都很安全。但要注意，不能在访向每个CPU数据过程中睡眠，否则，你就可能醒来后已经到了其他处理器上了。
+#### 设备驱动程序
 
-目前并不要求必须使用每个CPU的新接口，但是新接口在将来更容易使用，而且功能也会得到长足的优化。如果确实决定在你的内核中使用每个CPU数据，请考虑使用新接口。但是，新接口并不向后兼容之前的内核。
+内核通过设备驱动程序(device driver)与I/O设备交互。设备驱动程序包含在内核中，由控制一个或多个设备的数据结构和函数组成，这些设备包括硬盘、键盘、鼠标、监视器、网络接口及连接到SCSI总线上的设备。通过特定的接口，每个驱动程序与内核中的其余部分(甚至与其他驱动程序)相互作用这种方式具有以下优点：
 
-### 分配函数的选择
+- 可以把特定设备的代码封装在特定的模块中。
+- 厂商可以在不了解内核源代码而只知道接口规范的情况下，就能增加新的设备。
+- 内核以统一的方式对待所有的设备，并且通过相同的接口访问这些设备。
+- 可以把设备驱动程序写成模块，并动态地把它们装进内核而不需要重新启动系统。
+- 不再需要时，也可以动态地卸下模块，以减少存储在RAM中的内核映像的大小。
 
-如果需要连续的物理页，就可以使用某个低级页分配器或kmalloc()。这是内核中内存分配的常用方式，也是大多数情况下你自己应该使用的内存分配方式。
+下图说明了设备驱动程序与内核其他部分及进程之间的接口。
 
-如果想从高端内存进行分配，就使用alloc_pages()，该函数返回一个指向 struct page结构的指针，而不是一个指向某个逻辑地址的指针。因为高端内存很可能并没有被映射，因此，访问它的唯一方式就是通过相应的struct page结构。为了获得真正的指针，应该调用kmap()，把高端内存映射到内核的逻辑地址空间。
+一些用户程序(P)希望操作硬件设备。这些程序就利用常用的、与文件相关的系统调用及在/dev目录下能找到的设备文件向内核发出请求。实际上，设备文件是设备驱动程序接口中用户可见的部分。每个设备文件都有专门的设备驱动程序，它们由内核调用以执行对硬件设备的请求操作。
 
-如果不需要物理上连续的页，而仅仅需要虚拟地址上连续的页，那么就使用vmalloc（不过vmalloc()相对kmalloc()来说，有一定的性能损失）。vmalloc()函数分配的内存虚地址是连续的，但它本身并不保证物理上的连续。这与用户空间的分配非常类似，它也是把物理内存块映射到连续的逻辑地址空间上。
+这里值得一提的是，在Unix刚出现的时候，图形终端是罕见而且昂贵的，因此Unix内核只直接处理字符终端。当图形终端变得非常普遍时，一些如XWindow系统那样的特别的应用就出现了，它们以标准进程的身份运行，并且能直接访问图形界面的I/O端口和RAM的视频区域。一些新近的Unix内核，例如Linux 2.6，对图形卡的帧缓冲提供了一种抽象，从而允许应用软件无需了解图形界面的I/O端口的任何知识就能对其进行访问。
 
-如果要创建和撤销很多大的数据结构，那么考虑创建slab高速缓存。slab层会给每个处理器维持一个对象高速缓存(空闲链表)，这种高速缓存会极大地提高对象分配和回收的性能。slab层不是频繁地分配和释放内存，而是为你把事先分配好的对象存放到高速缓存中。当你需要一块新的内存来存放数据结构时，slab层一般无须另外去分配内存，而只需要从高速缓存中得到一个对象就可以了。
-
-## L-A：第15章 进程地址空间	
-
-内核除了管理本身的内存外，还必须管理用户空间的内存，即进程地址空间，也就是系统中每个用户空间进程所看到的内存。Linux采用虚拟内存技术，因此，系统中的所有进程之间以虚拟方式共享内存。对一个进程而言，它好像都可以访问整个系统的所有物理内存。更重要的是，即使单独一个进程，它拥有的地址空间也可以远远大于系统物理内存。
-
-### 地址空间
-
-进程地址空间由进程可寻址的虚拟内存组成，更为重要的特点是内核允许进程使用这种虚拟内存的地址。每个进程都有一个32位或64位的平坦（flat）地址空间，空间的具体大小取决于体系结构。“平坦”指的是地址空间范围是一个独立的连续区间（比如，地址从0x00000000扩展到0xffffffff的32位地址空间）。
-
-一些操作系统提供了段地址空间，这种地址空间并非是一个独立的线性区域，而是被分段的，但现代采用虚拟内存的操作系统通常都使用平坦地址空间而不是分段式的内存模式。通常情况下，每个进程都有唯一的这种平坦地址空间。一个进程的地址空间与另一个进程的地址空间即使有相同的内存地址，实际上也彼此互不相干。我们称这样的进程为线程。
-
-内存地址是一个给定的值，它要在地址空间范围之内，比如0x4021f000。这个值表示的是进程32位地址空间中的一个特定的字节。尽管一个进程可以寻址4GB的虚拟内存（在32位的地址空间中），但这并不代表它就有权访问所有的虚拟地址。在地址空间中，我们更为关心的是一些虚拟内存的地址区间，它们可被进程访问。这些可被访问的合法地址空间称为内存区域（memory areas）。通过内核，进程可以给自己的地址空间动态地添加或减少内存区域。
-
-进程只能访问有效内存区域内的内存地址。每个内存区域也具有相关权限，如对相关进程有可读、可写、可执行属性。如果一个进程访问了不在有效范围中的内存区域，或以不正确的方式访问了有效地址，那么内核就会终止该进程，并返回“段错误”信息。
-
-内存区域可以包含各种内存对象，比如:
-
-- 可执行文件代码的内存映射，称为代码段（text section）。
-- 可执行文件的“已初始化”全局变量的内存映射，称为数据段（data section）。
-- 包含“未初始化”全局变量，也就是bss段（Block Started by Symbol）的零页(页面中的信息全部为0值，所以可用于映射bss段等目的)的内存映射。
-- 用于进程用户空间栈（不要和进程内核栈混淆，进程的内核栈独立存在并由内核维护）的零页的内存映射。
-- 每一个诸如C库或动态连接程序等共享库的代码段、数据段和bss也会被载入进程的地址空间。
-- 任何内存映射文件。
-- 任何共享内存段。
-- 任何匿名的内存映射，比如由malloc()分配的内存。
-
-进程地址空间中的任何有效地址都只能位于唯一的区域，这些内存区域不能相互覆盖。可以看到，在执行的进程中，每个不同的内存片段都对应一个独立的内存区域:栈、对象代码、全局变量、被映射的文件等。
-
-### 内存描述符
-
-内核使用内存描述符结构体表示进程的地址空间，该结构包含了和进程地址空间有关的全部信息。内存描述符由mm_struct结构体表示，定义在<linux/sched.h>中。
-
-```c
-struct mm_struct {
-	struct vm_area_struct * mmap;		/*（虚拟）内存区域*/
-	struct rb_root mm_rb;				/*VMA形成的红黑树*/
-	struct vm_area_struct * mmap_cache;	/*最近使用的内存区域*/
-#ifdef CONFIG_MMU
-	unsigned long (*get_unmapped_area) (struct file *filp,
-				unsigned long addr, unsigned long len,
-				unsigned long pgoff, unsigned long flags);
-	void (*unmap_area) (struct mm_struct *mm, unsigned long addr);
-#endif
-	unsigned long mmap_base;		/* map映射的基地址 */
-	unsigned long task_size;		/* 任务空间大小 */
-	unsigned long cached_hole_size; 	/* free_area_cache下最大的空洞 */
-	unsigned long free_area_cache;		/* 地址空间第一个空洞 */
-	pgd_t * pgd;				/*全局页表，进行地址转换*/
-	atomic_t mm_users;			/*使用地址空间的用户数*/
-	atomic_t mm_count;			/* 对此结构有多少引用 */
-	int map_count;				/* 内存区域数 */
-	struct rw_semaphore mmap_sem;	/*内存区域信号量*/
-	spinlock_t page_table_lock;		/* 页表锁 */
-	struct list_head mmlist;		/*所有mm_struct形成的链表*/
-	unsigned long hiwater_rss;	/* RSS高水位*/
-	unsigned long hiwater_vm;	/* 虚拟内存高水位 */
-
-	unsigned long total_vm, locked_vm, shared_vm, exec_vm;
-	unsigned long stack_vm, reserved_vm, def_flags, nr_ptes;
-	unsigned long start_code, end_code, start_data, end_data;	/*代码段的首地址、尾地址，数据段的首地址、尾地址*/
-	unsigned long start_brk, brk, start_stack;	/*堆的首地址、尾地址、进程栈的首地址*/
-	unsigned long arg_start, arg_end, env_start, env_end;	/*命令行参数的首地址、尾地址，环境变量的首地址、尾地址*/
-	unsigned long saved_auxv[AT_VECTOR_SIZE]; /* 保存的auxv /proc/PID/auxv */
-	/*
-	 * Special counters, in some configurations protected by the
-	 * page_table_lock, in other configurations by being atomic.
-	 */
-	struct mm_rss_stat rss_stat;
-	struct linux_binfmt *binfmt;
-	cpumask_t cpu_vm_mask;		/*lazy TLB交换掩码*/	
-	mm_context_t context;		/* 体系结构特殊数据 */
-	/* Swap token stuff */
-	/*
-	 * Last value of global fault stamp as seen by this process.
-	 * In other words, this value gives an indication of how long
-	 * it has been since this task got the token.
-	 * Look at mm/thrash.c
-	 */
-	unsigned int faultstamp;
-	unsigned int token_priority;
-	unsigned int last_interval;
-
-	unsigned long flags; /* 状态标志 */
-	struct core_state *core_state; /* 核心转储支持 coredumping support */
-#ifdef CONFIG_AIO
-	spinlock_t		ioctx_lock;		/*AIO I/O链表锁*/
-	struct hlist_head	ioctx_list;	/*AIO I/O链表*/
-#endif
-#ifdef CONFIG_MM_OWNER
-	/*
-	 * "owner" points to a task that is regarded as the canonical
-	 * user/owner of this mm. All of the following must be true in
-	 * order for it to be changed:
-	 *
-	 * current == mm->owner
-	 * current->mm != mm
-	 * new_owner->mm == mm
-	 * new_owner->alloc_lock is held
-	 */
-	struct task_struct *owner;
-#endif
-
-#ifdef CONFIG_PROC_FS
-	/* store ref to file /proc/<pid>/exe symlink points to */
-	struct file *exe_file;
-	unsigned long num_exe_file_vmas;
-#endif
-#ifdef CONFIG_MMU_NOTIFIER
-	struct mmu_notifier_mm *mmu_notifier_mm;
-#endif
-};
-```
-
-mm_users域记录正在使用该地址的进程数目。如果两个线程共享该地址空间，那么mm_users的值便等于2；mm_count域是mm_struct结构体的主引用计数。所有的mm_users都等于mm_count的增加量。这样，在前面的例子中，mm_count就仅仅为1。如果有9个线程共享某个地址空间，那么mm_user将会是9，而mm_count的值将再次为1。当mm_user的值减为0（所有使用该地址的线程全部退出）时，mm_count域的值才变为0。当mm_count的值等于0，说明已经没有任何指向该结构体的引用了，这时该结构体会被撤销。当内核在一个地址空间上操作，并需要使用与该地址相关联的引用计数时，内核便增加mm_count。内核同时使用这两个计数器是为了区别主使用计数器和使用该地址空间的进程的数目。
-
-mmap和mm_rt这两个不同数据结构体描述的对象是相同的:该地址空间中的全部内存区域。但是前者以链表形式存放而后者以红-黑树的形式存放。
-
-内核通常会避免使用两种数据结构组织同一种数据，但此处内核这样的冗余确实派得上用场。mmap结构体作为链表，利于简单、高效地遍历所有元素;而mm_rb结构体作为红一黑树，更适合搜索指定元素。内核并没有复制mm_struct结构体，而仅仅被包含其中。
-
-所有的mm_struct结构体都通过自身的mmlist域连接在一个双向链表中，该链表的首元素是init_mm内存描述符，它代表init进程的地址空间。另外，操作该链表的时候需要使用mmlist_lock锁来防止并发访问，该锁定义在文件<kernel/fork.c>中。
-
-在进程描述符（<linux/sched.h>中定义的task_struct结构体）中，mm域存放着该进程的内存描述符，所以current->mm便指向当前进程的内存描述符。
-
-fork()函数利用copy_mm()函数复制父进程的内存描述符，也就是current->mm域给其子进程，而子进程中的mm_struct结构体实际是通过文件kernel/fork.c中的allocate_mm()宏从mm_cachep slab缓存中分配得到的。
-
-```c
-#define allocate_mm()	(kmem_cache_alloc(mm_cachep, GFP_KERNEL))
-oldmm = current->mm;
-memcpy(mm, oldmm, sizeof(*mm));
-```
-
-通常，每个进程都有唯一的mm_struct结构体，即唯一的进程地址空间。
-
-如果父进程希望和其子进程共享地址空间，可以在调用clone()时，设置CLONE_VM标志。我们把这样的进程称作线程。是否共享地址空间几乎是进程和Linux中所谓的线程间本质上的唯一区别。除此以外，Linux内核并不区别对待它们，线程对内核来说仅仅是一个共享特定资源的进程而已。
-
-当CLONE_VM被指定后，内核就不再需要调用allocate_mm函数了，而仅仅需要在调用copy_mm函数中将mm域指向其父进程的内存描述符就可以了：
-
-```c
-/*代码有省略*/
-oldmm = current->mm;
-if (clone_flags & CLONE_VM) {
-		atomic_inc(&oldmm->mm_users);
-		mm = oldmm;
-		goto good_mm;
-	}
-tsk->mm = mm;
-```
-
-当进程退出时，内核会调用定义在<kernel/exit.c>中的exit_mm()函数，该函数执行一些常规的撤销工作，同时更新一些统计量。其中，该函数会调用mmput()函数减少内存描述符中的mm_user用户计数，如果用户计数降到零，将调用mmdrop()函数，减少mm_count使用计数。如果使用计数也等于零了，说明该内存描迷符不再有任何使用者了，那么调用free_mm()宏通过kmem_cache_free()函数将mm_struct结构体归还到mm_cachep slab缓存中。
-
-内核线程没有进程地址空间，也没有相关的内存描述符。所以内核线程对应的进程描述符中mm域为空。事实上，这也正是内核线程的真实含义—它们没有用户上下文。
-
-内核线程并不需要访问任何用户空间的内存(那它们访问谁的呢?)，而且因为内核线程在用户空间中没有任何页，所以实际上它们并不需要有自己的内存描述符和页表。尽管如此，即使访问内核内存，内核线程也还是需要使用一些数据的，比如页表。为了避免内核线程为内存描述符和页表浪费内存，也为了当新内核线程运行时，避免浪费处理器周期向新地址空间进行切换，内核线程将直接使用前一个进程的内存描述符。
-
-当一个进程被调度时，该进程的mm域指向的地址空间被装载到内存，进程描述符中的active_mm域会被更新，指向新的地址空间。内核线程没有地址空间，所以mm城为NULL。于是，当一个内核线程被调度时，内核发现它的mm域为NULL，就会保留前一个进程的地址空间，随后内核更新内核线程对应的进程描述符中的active_mm域，使其指向前一个进程的内存描述符。所以在需要时，内核线程便可以使用前一个进程的页表。因为内核线程不访问用户空间的内存，所以它们仅仅使用地址空间中和内核内存相关的信息，这些信息的含义和普通进程完全相同。
-
-### 虚拟内存区域
-
-内存区域由vm_area_struct结构体描述，定义在文件<linux/mm_types.h>中。内存区域在Linux内核中也经常称作虚拟内存区域（virtual memory Areas，VMAs）。
-
-vm_area_struct结构体描述了指定地址空间内连续区间上的一个独立内存范围。内核将每个内存区域作为一个单独的内存对象管理，每个内存区域都拥有一致的属性，比如访问权限等，另外，相应的操作也都一致。按照这样的方式，每一个VMA就可以代表不同类型的内存区域（比如内存映射文件或者进程用户空间栈），下面给出该结构定义和各个域的描述:
-
-```c
-struct vm_area_struct {
-	struct mm_struct * vm_mm;	/* 所属的mm_struct结构体 */
-	unsigned long vm_start;		/* 区间的首地址 */
-	unsigned long vm_end;		/* 区间的尾地址 */	
-	struct vm_area_struct *vm_next;		/* VMA链表 */
-
-	pgprot_t vm_page_prot;		/* 访问此区间的权限 */
-	unsigned long vm_flags;		/* 标志 mm.h. */
-
-	struct rb_node vm_rb;		/*红黑树上的该VMA节点*/
-	/* 或者关联于 address_space->i_mmap字段，或者关联于 address_space->i_mmap_nonlinear字段*/
-	union {
-		struct {
-			struct list_head list;
-			void *parent;	/* aligns with prio_tree_node parent */
-			struct vm_area_struct *head;
-		} vm_set;
-		struct raw_prio_tree_node prio_tree_node;
-	} shared;
-
-	struct list_head anon_vma_chain; /* anon_vma项，Serialized by 	mmap_sem & * page_table_lock*/
-	struct anon_vma *anon_vma;	/* 匿名VMA对象 page_table_lock */
-	const struct vm_operations_struct *vm_ops;	/* 相关操作表 */
-	/* Information about our backing store: */
-	unsigned long vm_pgoff;		/* Offset (within vm_file) in PAGE_SIZE
-					   units, *not* PAGE_CACHE_SIZE */
-	struct file * vm_file;		/* 被映射的文件(can be NULL). */
-	void * vm_private_data;		/* 私有数据was vm_pte (shared mem) */
-	unsigned long vm_truncate_count;/* truncate_count or restart_addr */
-#ifndef CONFIG_MMU
-	struct vm_region *vm_region;	/* NOMMU mapping region */
-#endif
-#ifdef CONFIG_NUMA
-	struct mempolicy *vm_policy;	/* NUMA policy for the VMA */
-#endif
-};
-```
-
-每个内存描述符都对应于进程地址空间中的唯一区间。vm_start域指向区间的首地址〔最低地址)，vm_end域指向区间的尾地址(最高地址)之后的第一个字节，也就是说，vm_start是内存区间的开始地址(它本身在区间内)，而vm_end是内存区间的结束地址（它本身在区间外），因此，vm_end-vm_start的大小便是内存区间的长度，内存区域的位置就在[vm_start, vm_end]之中。注意，在同一个地址空间内的不同内存区间不能重叠。
-
-vm_mm域指向和VMA相关的mm_struct结构体，注意，每个VMA对其相关的mm_struct 结构体来说都是唯一的，所以即使两个独立的进程将同一个文件映射到各自的地址空间，它们分别都会有一个vm_area_struct结构体来标志自己的内存区域;反过来，如果两个线程共享一个地址空间，那么它们也同时共享其中的所有vm_area_struct结构体。
-
-VMA标志（vm_flags）是一种位标志，定义在<linux/mm.h>，标志了内存区域所包含的页面的行为和信息。和物理页的访问权限不同，VMA标志反映了内核处理页面所需要遵守的行为准则，而不是硬件要求。而且，vm_flags同时也包含了内存区域中每个页面的信息，或内存区域的整体信息，而不是具体的独立页面。
-
-VM_READ、VM_WRITE和VM_EXEC标志了内存区域中页面的读、写和执行权限。这些标志根据要求组合构成VMA的访问控制权限。
-
-VM_SHARED指明了内存区域包含的映射是否可以在多进程间共享。如果设置，则成为共享映射，否则称为私有映射。
-
-VM_IO标志内存区域中包含了对设备I/O空间的映射。通常在设备驱动程序执行mmap()函数进行I/O空间映射时才被设置，同时该标志也表示该内存区域不能被包含在任何进程的存放转存（core dump）中。VM_RESERVED标志规定了内存区域不能被换出，它也是在设备驱动程序进行映射时被设置。
-
-VM_SEQ_READ标志暗示内核应用程序对映射内容执行有序的(线性和连续的)读操作。这样，内核可以有选择地执行预读文件。VM_RAND_READ标志的意义正好相反，暗示应用程序对映射内容执行随机的(非有序的)读操作。因此内核可以有选择地减少或彻底取消文件预读。这两个标志可以通过系统调用madvise()设置，设置参数分别是MADV_SEQUENTIAL和MADV_RANDOM。
-
-vm_area_struct中的vm_ops域指向与指定内存区域相关的操作函数表，内核使用表中的方法操作VMA。vm_area_struct作为通用对象代表了任何类型的内存区域。函数表由vm_operations_struct结构体表示，定义在<linux/mm.h>中：
-
-```c
-struct vm_operations_struct {
-  	/*指定的内存区域被加入到一个地址空间时调用*/
-	void (*open)(struct vm_area_struct * area);
-  	/*指定的内存区域从地址空间删除时调用*/
-	void (*close)(struct vm_area_struct * area);
-  	/*没有出现在物理内存中的页被访问时，页面故障处理调用*/
-	int (*fault)(struct vm_area_struct *vma, struct vm_fault *vmf);
-	/* notification that a previously read-only page is about to become
-	 * writable, if an error is returned it will cause a SIGBUS */
-	int (*page_mkwrite)(struct vm_area_struct *vma, struct vm_fault *vmf);
-	/* called by access_process_vm when get_user_pages() fails, typically
-	 * for use by special VMAs that can switch between memory and hardware
-	 */
-	int (*access)(struct vm_area_struct *vma, unsigned long addr,
-		      void *buf, int len, int write);
-#ifdef CONFIG_NUMA
-	/*
-	 * set_policy() op must add a reference to any non-NULL @new mempolicy
-	 * to hold the policy upon return.  Caller should pass NULL @new to
-	 * remove a policy and fall back to surrounding context--i.e. do not
-	 * install a MPOL_DEFAULT policy, nor the task or system default
-	 * mempolicy.
-	 */
-	int (*set_policy)(struct vm_area_struct *vma, struct mempolicy *new);
-	/*
-	 * get_policy() op must add reference [mpol_get()] to any policy at
-	 * (vma,addr) marked as MPOL_SHARED.  The shared policy infrastructure
-	 * in mm/mempolicy.c will do this automatically.
-	 * get_policy() must NOT add a ref if the policy at (vma,addr) is not
-	 * marked as MPOL_SHARED. vma policies are protected by the mmap_sem.
-	 * If no [shared/vma] mempolicy exists at the addr, get_policy() op
-	 * must return NULL--i.e., do not "fallback" to task or system default
-	 * policy.
-	 */
-	struct mempolicy *(*get_policy)(struct vm_area_struct *vma,
-					unsigned long addr);
-	int (*migrate)(struct vm_area_struct *vma, const nodemask_t *from,
-		const nodemask_t *to, unsigned long flags);
-#endif
-};
-```
-
-内存描述符中，mmap和mm_rb，这两个域各自独立地指向与内存描述符相关的全体内存区域对象。包含完全相同的vm_area_struct结构体指针，仅仅组织方法不同。
-
-mmap域使用单链表连接所有的内存区域对象。vm_area_struct结构体通过自身的vm_next域被连入链表，所有的区域按地址增长的方向排序，mmap域指向链表中第一个内存区域，链中最后一个结构体指针指向空。
-
-mm_rb域使用红-黑树连接所有的内存区域对象。mm_rb域指向红-黑树的根节点，地址空间中每一个vm_aera_struct结构体通过自身的vm_rb域连接到树中。
-
-链表用于需要追历全部节点的时候，而红-黑树适用于在地址空间中定位特定内存区域的时候。内核为了内存区域上的各种不同操作都能获得高性能，所以同时使用了这两种数据结构。
-
-可以使用/proc文件系统和pmap(1)根据查看指定进程的内存空间和其中所含的内存区域。/proc/<pid>/maps。
-
-内核时常需要在某个内存区域上执行一些操作，比如某个指定地址是否包含在某个内存区域中。这类操作非常频繁，为了方便执行这类对内存区域的操作，内核定义了许多的辅助函数。它们都声明在文件<linux/mm.h>中。
-
-### 操作内存区域
-
-find_vma()函数：找到给定的内存地址属于哪一个内存区域。定义在<mmap.c>中。该函数在指定的地址空间中搜索第一个vm_end大于addr的内存区域。换句话说，该函数寻找第一个包含addr或首地址大于addr的内存区域，如果没有发现这样的区域，该函数返回NULL；否则返回指向匹配的内存区域的vm_area_struct结构体指针。注意，由于返回的VMA首地址可能大于addr，所以指定的地址并不一定就包含在返回的VMA中。因为很有可能在对某个VMA执行操作后，还有其他更多的操作会对该VMA接着进行操作，所以find_vma()函数返回的结果披缓存在内存描述符的mmap-cache域中。（先搜索缓存，因此结果可能不正确）
-
-find_vma_prev() 返回第一个小于addr的VMA。
-
-### mmap()和do_mmap()：创建地址区间
-
-内核使用do_mmap()函数创建一个新的线性地址区间。但是说该函数创建了一个新VMA井不非常谁确，因为如果创建的地址区间和一个已经存在的地址区间相邻，并且它们具有相同的访问权限的话，两个区间将合并为一个。如果不能合并，就确实需要创建一个新的VMA了。但无论哪种情况，do_mmap()函数都会将一个地址区间加入到进程的地址空间中——无论是扩展已存在的内存区域还是创建一个新的区域。函数定义在文件<linux/mm.h>中。
-
-```c
-static inline unsigned long do_mmap(struct file *file, unsigned long addr,
-	unsigned long len, unsigned long prot,
-	unsigned long flag, unsigned long offset)
-```
-
-该函数映射由file指定的文件，具体映射的是文件中从偏移offset处开始，长度为len字节的范围内的数据。如果file参数是NULL并且offset参数也是0，那么就代表这次映射没有和文件相关，该情况称作匿名映射（anonymous mapping）。如果指定了文件名和偏移量，那么该映射称为文件映射（file-backed mapping）。
-
-addr是可选参数，它指定搜索空闲区域的起始位置。
-
-prot参数指定内存区域中页面的访问权限。访问权限标志定义在<asm/mman.h>中。
-
-| 标志         | 权限         |
-| ---------- | ---------- |
-| PROT_READ  | 对应于VM_READ |
-| PROT_WRITE | VM_WRITE   |
-| PROT_EXEC  | VM_EXEC    |
-| PROT_NONE  | 页不可被访问     |
-
-flag指定了VMA标志，指定类型并改变映射的行为。
-
-如果系统调用do_map()的参数中有无效参数，那么它返回一个负值；否则，它会在虚拟内存中分配一个合适的新内存区域。如果有可能的话，将新区域和邻近区域进行合并，否则内核从vm_area_cachep长字节slab缓存中分配一个vm_area_struct结构体，并使用vma_link()函数将新分配的内存区域添加到地址空间的内存区域链表和红-黑树中，随后还要更新内存描述符中的total_vm域，然后才返回新分配的地址区间的初始地址。
-
-通过mmap()族函数系统调用获取内核函数do_mmap()的功能。
-
-### mummap()和do_mummap()：删除地址区间
-
-do_mummap()从特定的进程地址空间中删除指定地址区间，定义在<linux/mm.h>中。
-
-```c
-int do_munmap(struct mm_struct *, unsigned long, size_t);
-```
-
-第一个参数指向要删除区域所在的地址空间，删除从第二个参数开始，长度为第三个参数的地址区间。系统调用在<mm/mmap.c>中。sys_munmap()。
-
-### 页表
-
-应用程序操作的对象是映射到物理内存之上的虚拟内存，但处理器直接操作的却是物理内存。所以当程序访问一个虚拟地址时，首先必须将虚拟地址转化成物理地址，然后处理器才能解析地址访问请求。地址的转换工作需要通过查询页表才能完成，概括地讲，地址转换需要将虚拟地址分段，使每段虚拟地址都作为一个索引指向页表，而页表项则指向下一级别的页表或者指向最终的物理页面。
-
-Linux中使用三级页表完成地址转换。利用多级页表能够节约地址转换需占用的存放空间。如果利用三级页表转换地址，即使是64位机器，占用的空间也很有限。但是如果使用静态数组实现页表，那么即便在32位机器上，该数组也将占用巨大的存放空间。Linux对所有体系结构，包括对那些不支持三级页表的体系结构(比如，有些体系结构只使用两级页表或者使用散列表完成地址转换)都使用三级页表管理，因为使用三级页表结构可以利用“最大公约数”的思想—一种设计简单的体系结构，可以按照需要在编译时简化使用页表的二级结构，比如只使用两级。
-
-顶级页表是页全局目录（PGD, Page Global Directory），它包含了一个pgd_t类型数组，多数体系结构中pgd_t类型等同于无符号长整型类型。PGD中的表项指向二级页目录中的表项:PMD。
-
-二级页表是中间页目录(PMD, Page Middle Directory)，它是个pmd_t类型数组，其中的表项指向PTE中的表项。
-
-最后一级的页表简称页表（PTE, Page Table Entry），其中包含了pte_t类型的页表项，该页表项指向物理页面。
-
-多数体系结构中，搜索页表的工作是由硬件完成的(至少某种程度上)。虽然通常操作中，很多使用页表的工作都可以由硬件执行，但是只有在内核正确设置页表的前提下，硬件才能方便地操作它们。![虚拟-物理地址查询.jpg](https://github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/%E8%99%9A%E6%8B%9F-%E7%89%A9%E7%90%86%E5%9C%B0%E5%9D%80%E6%9F%A5%E8%AF%A2.jpg?raw=true)
-
-每个进程都有自己的页表(当然，线程会共享页表)。内存描述符（mm_struct）的pgd域指向的就是进程的页全局目录。注意，操作和检索页表时必须使用page_table_lock锁，该锁在相应的进程的内存描述符中，以防止竟争条件。页表对应的结构体依赖于具体的体系结构，所以定义在<asm/page.h>中。
-
-由于几乎每次对虚拟内存中的页面访间都必须先解析它，从而得到物理内存中的对应地址，所以页表操作的性能非常关键。但不幸的是，搜索内存中的物理地址速度很有限，因此为了加快搜素，多数体系结构都实现了一个翻译后缓冲器（Translate Lookaside Buffer, TLB）作为一个将虚拟地址映射到物理地址的硬件缓存。当请求访问一个虚拟地址时，处理器将首先检查TLB中是否缓存了该虚拟地址到物理地址的映射。
-
-虽然硬件完成了有关页表的部分工作，但是页表的管理仍然是内核的关键部分——而且在不断改进。2.6版内核对页表管理的主要改进是：从高端内存分配部分页表。今后可能的改进包括：通过在写时拷贝(cogy-}n-write)的方式共亨页表。这种机制使得在fork()操作中可由父子进程共享页表。因为只有当子进程或父进程试图修改特定页表项时，内核才去创建该页表项的新拷贝，此后父子进程才不再共享该页表项。可以看到，利用共享页表可以消除fork()操作中页表拷贝所带来的消耗。
-
-## L-B：第2章 内存寻址
+## 第2章 内存寻址
 
 ### 内存地址
 
@@ -1844,14 +1460,42 @@ Linux 2.6提供了几种在合适时机应当运用的TLB刷新方法，这取�
 - 只要CPU还处于懒惰TLB模式，它将不接受其他与TLB刷新相关的处理器间中断。
 - 如果CPU切换到另一个进程，而这个进程与刚被替换的内核线程使用相同的页表集，那么内核调用\_\_flush_tlb()使该CPU的所有非全局TLB表项无效。
 
-## L-B：第8章 内存管理
+##  第3章 进程
 
-## L-B：第9章 进程地址空间
+## 第4章 中断与异常
 
-## L-A：第16章 页高速缓存和页回写
+## 第5章 内核同步
 
-暂略
+## 第6章 定时测量
 
-## L-B：第15章 页高速缓存
+## 第7章 进程调度
 
-## L-B：第17章 回收页框
+## 第8章 内存管理
+
+## 第9章 进程地址空间
+
+## 第10章 系统调用
+
+## 第11章 信号
+
+## 第12章 虚拟文件系统
+
+## 第13章 I/O体系结构和设备驱动程序
+
+## 第14章 块设备驱动程序
+
+## 第15章 页高速缓存
+
+## 第16章 访问文件
+
+## 第17章 回收页框
+
+## 第18章 Ext2和Ext3文件系统
+
+## 第19章 进程通信
+
+## 第20章 程序的执行
+
+## 附录一 系统启动
+
+## 附录二 模块
