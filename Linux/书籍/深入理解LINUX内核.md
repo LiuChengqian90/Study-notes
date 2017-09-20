@@ -2424,17 +2424,258 @@ do_fork()利用辅助函数copy_process()来创建进程描述符以及子进程
 
 #### copy_process()函数
 
+copy_process()创建进程描述符以及子进程执行所需要的所有其他数据结构。它的参数与do_fork()的参数相同，外加子进程的PID。下面描述copy_process()的最重要的步骤：
+
+1. 检查参数clone_flags所传递标志的一致性。在下列情况下，它返回错误代号：
+   - CLONE_NEWNS和CLONE_FS标志都被设置。
+   - CLONE_THREAD标志被设置，但CLONE_SIGRAND标志被清0(同一线程组中的轻量级进程必须共享信号)。
+   - CLONE_SIGHAND标志被设置，但CLONE_VM被清0(共享信号处理程序的轻量级进程也必须共享内存描述符)。
+2. 通过调用security_task_create()以及稍后调用的security_task_alloc()执行所有附加的安全检查。Linux 2.6提供扩展安全性的钩子函数，与传统Unix相比，它具有更加强壮的安全模型。详情参见第二十章。
+3. 调用dup_task_struct()为子进程获取进程描述符。该函数执行如下操作：
+   - 如果需要，则在当前进程中调用\_\_unlazy_fpu()，把FPU,MMX和SSE/SSE2寄存器的内容保存到父进程的thread_info结构中。稍后，dup_task_struct()将把这些值复制到子进程的thread_info结构中。
+   - 执行alloc_task_struct()宏，为新进程获取进程描述符(task_struct结构)，并将描述符地址保存在tsk局部变量中。
+   - 执行alloc_thread_info宏以获取一块空闲内存区，用来存放新进程的thread_info结构和内核栈，并将这块内存区字段的地址存在局部变量ti中。正如在本章前面“标识一个进程”一节中所述:这块内存区字段的大小是8KB或4KB。
+   - 将current进程描述符的内容复制到tsk所指向的task_struct结构中，然后把tsk->thread_ info置为ti。
+   - 把current进程的thread_info描述符的内容复制到ti所指向的结构中，然后把ti->task置为tsk。
+   - 把新进程描述符的使用计数器(tsk->usage)置为2，用来表示进程描述符正在被使用而且其相应的进程处于活动状态(进程状态即不是EXIT_ ZOMBIE,也不是EXIT_DEAD)。
+   - 返回新进程的进程描述符指针(tsk)。
+4. 检查存放在current->signal->rlim[RLIMIT_NPROC].rlim_cur变量中的值是否小于或等于用户所拥有的进程数。如果是，则返回错误码，除非进程没有root权限。该函数从每用户数据结构user_struct中获取用户所拥有的进程数。通过进程描述符user字段的指针可以找到这个数据结构。
+5. 递增user_struct结构的使用计数器(tsk->user->\_\_count字段)和用户所拥有的进程的计数器(tsk->user->processes)。
+6. 检查系统中的进程数量(存放在nr_threads变量中)是否超过max_threads变量的值。这个变量的缺省值取决于系统内存容量的大小。总的原则是:所有thread_info描述符和内核栈所占用的空间不能超过物理内存大小的1/8。不过，系统管理员可以通过写/proc/sys/kernel/threads-max文件来改变这个值。
+7. 如果实现新进程的执行域和可执行格式的内核函数(参见第二十章)都包含在内核模块中，则递增它们的使用计数器(参见附录二)。
+8. 设置与进程状态相关的几个关键字段：
+   - 把大内核锁计数器tsk->lock_depth初始化为-1(参见第五章“大内核锁”一节)。
+   - 把tsk->did_exec字段初始化为0；它记录了进程发出的execve()系统调用的次数。
+   - 更新从父进程复制到tsk->flags字段中的一些标志:首先清除PF_SUPERPRIV标志，该标志表示进程是否使用了某种超级用户权限。然后设置PF_FORKNOEXEC标志，它表示子进程还没有发出execve()系统调用。
+9. 把新进程的PID存人tsk->pid字段。
+10. 如果clone_flags参数中的CLONE_PARENT_SETTID标志被设置，就把子进程的PID复制到参数parent_tidptr指向的用户态变量中。
+11. 初始化子进程描述符中的list_head数据结构和自旋锁，并为与挂起信号、定时器及时间统计表相关的几个字段赋初值。
+12. 调用copy_semundo()，copy_files()，copy_fs()，copy_sighand()，copy_signal() , copy_mm()和copy namespace()来创建新的数据结构，并把父进程相应数据结构的值复制到新数据结构中，除非clone_flags参数指出它们有不同的值。
+13. 调用copy_thread()，用发出clone()系统调用时CPU寄存器的值(正如第十章所述，这些值已经被保存在父进程的内核栈中)来初始化子进程的内核栈。不过，copy_thread()把eax寄存器对应字段的值[这是fork()和clone()系统调用在子进程中的返回值]字段强行置为0。子进程描述符的thread.esp字段初始化为子进程内核栈的基地址，汇编语言函数(ret_from_fork())的地址存放在thread.eip字段中。如果父进程使用I/O权限位图，则子进程获取该位图的一个拷贝。最后，如果CLONE_SETTLS标志被设置，则子进程获取由clone()系统调用的参数tls指向的用户态数据结构所表示的TLS段(tls并不被传递给do_fork()和嵌套函数。在第十章会看到，通过拷贝系统调用的参数的值到某个CPU寄存器来把它们传递给内核；因此，这些值与其他寄存器一起被保存在内核态堆栈中。copy_thread()只查看esi的值在内核堆栈中对应的位置保存的地址)。
+14. 如果clone_flags参数的值被置为CLONE_CHILD_SETTID或CLONE_CHILD_CLEARTID,就把child_tidptr参数的值分别复制到tsk->setchid_tid或tsk->clear_child_tid字段。这些标志说明:必须改变子进程用户态地址空间的child_tidptr所指向的变量的值，不过实际的写操作要稍后再执行。
+15. 清除子进程thread_info结构的TIF_SYSCALL_TRACE标志，以使ret_from_fork()函数不会把系统调用结束的消息通知给调试进程(参见第十章“进入和退出系统调用”一节)。(因为对子进程的跟踪是由tsk->ptrace中的PTRACE_SYSCALL标志来控制的，所以子进程的系统调用跟踪不会被禁用。)
+16. 用clone_flags参数低位的信号数字编码初始化tsk->exit_signal字段，如果CLONE_THREAD标志被置位，就把tsk->exit_sinal字段初始化为-1。正如我们将在本章稍后“进程终止”一节所看见的，只有当线程组的最后一个成员(通常是线程组的领头)“死亡”，才会产生一个信号，以通知线程组的领头进程的父进程。
+17. 调用sched_fork()完成对新进程调度程序数据结构的初始化。该函数把新进程的状态设置为TASK_RUNNING，并把thread_info结构的preempt_count字段设置为1，从而禁止内核抢占(参见第五章“内核抢占”一节)。此外，为了保证公平的进程调度，该函数在父子进程之间共享父进程的时间片(参见第七章“scheduler_tick()函数”一节)。
+18. 把新进程的thread_info结构的cpu字段设置为由smp_processor_id()所返回的本地CPU号。
+19. 初始化表示亲子关系的字段。尤其是，如果CLONE_PARENT或CLONE_THREAD被设置，就用curent->real_parent的值初始化tsk->real_parent和tsk->parent,因此，子进程的父进程似乎是当前进程的父进程。否则，把tsk->real_parent和tsk->parent置为当前进程。
+20. 如果不需要跟踪子进程(没有设置CLONE_PTRAC标志)，就把tsk->ptrace字段设置为O。tsk->ptrace字段会存放一些标志，而这些标志是在一个进程被另外一个进程跟踪时才会用到的。采用这种方式，即使当前进程被跟踪，子进程也不会被跟踪。
+21. 执行SET_LINKS宏，把新进程描述符插人进程链表。
+22. 如果子进程必须被跟踪(tsk->ptrace字段的PT_PTRACED标志被设置)，就把current->parent赋给tsk->parent，并将子进程插入调试程序的跟踪链表中。
+23. 调用attach_pid()把新进程描述符的PID插入pidhash[PIDTYPE_PID]散列表。
+24. 如果子进程是线程组的领头进程(CLONE_THREAD标志被清0)：
+    - 把tsk->tgid的初值置为tsk->pid。
+    - 把tsk->group_leader的初值置为tsk。
+    - 调用三次attach_pid()，把子进程分别插入PIDTYPE_TGID, PIDTYPE_PGID和PIDTYPE_SID类型的PID散列表。
+25. 否则，如果子进程属于它的父进程的线程组(CLONE_THREAD标志被设置)：
+    - 把tsk->tgid的初值置为tsk->current->tgid。
+    - 把tsk->group_leader的初值置为current->group_leader的值。
+    - 调用attach_pid()，把子进程插入PIDTYPE_TGID类型的散列表中(更具体地说，插入current->group_leader进程的每个PID链表)。
+26. 现在，新进程已经被加入进程集合:递增nr_threads变量的值。
+27. 递增total_forks变量以记录被创建的进程的数量。
+28. 终止并返回子进程描述符指针(tsk)。
+
+现在，我们有了处于可运行状态的完整的子进程。但是，它还没有实际运行，调度程序要决定何时把CPU交给这个子进程。在以后的进程切换中，调度程序继续完善子进程:把子进程描述符thread字段的值装入几个CPU寄存器。特别是把thread.esp(即把子进程内核态堆栈的地址)装人esp寄存器，把函数ret_from_fork()的地址装人eip寄存器。这个汇编语言函数调用schedule_tail()函数(它依次调用finish_task_switch()来完成进程切换，参见第七章“schedule()函数”一节)，用存放在栈中的值再装载所有的寄存器，并强迫CPU返回到用户态。然后，在fork(),vfork()或clone()系统调用结束时，新进程将开始执行。系统调用的返回值放在eax寄存器中:返回给子进程的值是0，返回给父进程的值是子进程的PID。回顾copy_thread()对子进程的eax寄存器所执行的操作(copy_process()的第13步)，就能理解这是如何实现的。
+
+除非fork系统调用返回0，否则，子进程将与父进程执行相同的代码(参见copy_process()的第13步)。应用程序的开发者可以按照Unix编程者熟悉的方式利用这一事实，在基于PID值的程序中插人一个条件语句使子进程与父进程有不同的行为。
+
 #### 内核线程
+
+传统的Unix系统把一些重要的任务委托给周期性执行的进程，这些任务包括刷新磁盘高速缓存，交换出不用的页框，维护网络连接等等。事实上，以严格线性的方式执行这些任务的确效率不高，如果把它们放在后台调度，不管是对它们的函数还是对终端用户进程都能得到较好的响应。因为一些系统进程只运行在内核态，所以现代操作系统把它们的函数委托给内核线程(kernel thread)，内核线程不受不必要的用户态上下文的拖累。在Linux中，内核线程在以下几方面不同于普通进程：
+
+- 内核线程只运行在内核态，而普通进程既可以运行在内核态，也可以运行在用户态。
+- 因为内核线程只运行在内核态，它们只使用大于PAGE_OFFSET的线性地址空间。另一方面，不管在用户态还是在内核态，普通进程可以用4GB的线性地址空间。
+
+##### 创建一个内核线程
+
+kernel_thread()函数创建一个新的内核线程，它接受的参数有:所要执行的内核函数的地址(fn)、要传递给函数的参数(arg)、一组clone标志(flags)。该函数本质上以下面的方式调用do_fork()：
+
+```c
+int kernel_thread(int (*fn)(void *), void * arg, unsigned long flags)
+{
+	struct pt_regs regs;
+
+	memset(&regs, 0, sizeof(regs));
+
+	regs.ebx = (unsigned long) fn;
+	regs.edx = (unsigned long) arg;
+
+	regs.xds = __USER_DS;
+	regs.xes = __USER_DS;
+	regs.orig_eax = -1;
+	regs.eip = (unsigned long) kernel_thread_helper;
+	regs.xcs = __KERNEL_CS;
+	regs.eflags = X86_EFLAGS_IF | X86_EFLAGS_SF | X86_EFLAGS_PF | 0x2;
+
+	/* Ok, create the new process.. */
+	return do_fork(flags | CLONE_VM | CLONE_UNTRACED, 0, &regs, 0, NULL, NULL);
+}
+```
+
+CLONE_VM标志避免复制调用进程的页表:由于新内核线程无论如何都不会访问用户态地址空间，所以这种复制无疑会造成时间和空间的浪费。CLONE_UNTRACED标志保证不会有任何进程跟踪新内核线程，即使调用进程被跟踪。
+
+传递给do_fork()的参数regs表示内核栈的地址，copy_thread()函数将从这里找到为新线程初始化CPU寄存器的值。kernel_thread()函数在这个栈中保留寄存器值的目的是：
+
+- 通过copy_thread()把ebx和edx分edx设置为参数fn和arg的值。
+
+- 把eip寄存器的值设置为下面汇编语言代码段的地址：
+
+  ```c
+  movl %edx, %eax
+  pushl %edx
+  call *%ebx
+  pushl %eax
+  call do_exit
+  ```
+
+因此，新的内核线程开始执行fn(arg)函数，如果该函数结束，内核线程执行系统调用_exit()，并把fn()的返回值传递给它(参见本章稍后“撤消进程”一节)。
+
+##### 进程0
+
+所有进程的祖先叫做进程0，idle进程或因为历史的原因叫做swapper进程，它是在Linux的初始化阶段从无到有创建的一个内核线程。这个祖先进程使用下列静态分配的数据结构(所有其他进程的数据结构都是动态分配的)：
+
+- 存放在init_task变量中的进程描述符，由INIT_TASK宏完成对它的初始化。
+
+- 存放在init_thread_union变量中的thread_info描述符和内核堆栈，由INiT_THREAD_INFO宏完成对它们的初始化。
+
+- 由进程描述符指向的下列表：
+
+  ——init_mm
+
+  ——init_fs
+
+  ——init_files
+
+  ——init_signals
+
+  ——init_sighand
+
+  这些表分别由下列宏初始化：
+
+  ——INIT_MM
+
+  ——INIT_FS
+
+  ——INIT_FILES
+
+  ——INIT_SIGNALS
+
+  ——INIT_SIGHAND
+
+- 主内核页全局目录存放在swapper_pg_dir中(参见第二章“内核页表”一节)。
+
+start_kernel()函数初始化内核需要的所有数据结构，激活中断，创建另一个叫进程1的内核线程(一般叫做init进程)：
+
+```c
+kernel_thread(init, NULL, CLONE_FS | CLONE_SIGHAND);
+```
+
+新创建内核线程的PID为1，并与进程0共享每进程所有的内核数据结构。此外，当调度程序选择到它时，init进程开始执行init()函数。
+
+创建init进程后，进程0执行cpu_idle()函数，该函数本质上是在开中断的情况下重复执行hlt汇编语言指令(参见第四章)。只有当没有其他进程处于TASK_RUNNING状态时，调度程序才选择进程O。
+
+在多处理器系统中，每个CPU都有一个进程0。只要打开机器电源，计算机的BIOS就启动某一个CPU，同时禁用其他CPU。运行在CPU 0上的swapper进程初始化内核数据结构，然后激活其他的CPU，并通过copy_process()函数创建另外的swapper进程，把0传递给新创建的swapper进程作为它们的新PID。此外，内核把适当的CPU索引赋给内核所创建的每个进程的thread_info描述符的cpu字段。
+
+##### 进程1
+
+由进程0创建的内核线程执行init()函数，init()依次完成内核初始化。init()调用execve()系统调用装入可执行程序init。结果，init内核线程变为一个普通进程，且拥有自己的每进程(per-process)内核数据结构(参见第二十章)。在系统关闭之前，init进程一直存活，因为它创建和监控在操作系统外层执行的所有进程的活动。
+
+##### 其他内核线程
+
+Linux使用很多其他内核线程。其中一些在初始化阶段创建，一直运行到系统关闭；而其他一些在内核必须执行一个任务时“按需”创建，这种任务在内核的执行上下文中得到很好的执行。
+
+一些内核线程的例子(除了进程0和进程1)是：
+
+| 线程              | 描述                                       |
+| --------------- | ---------------------------------------- |
+| keventd(也被称为事件) | 执行keventd_wq工作队列(参见第四章)中的函数。             |
+| kapmd           | 处理与高级电源管理(APM)相关的事件。                     |
+| kswapd          | 执行内存回收，在第十七章“周期回收”一节将进行描述。               |
+| pdflush         | 刷新“脏”缓冲区中的内容到磁盘以回收内存，在第十五章“pdflush内核线程”一 |
+| kblockd         | 执行kblockd_workqueue工作队列中的函数。实质上，它周期性地激活块设备驱动程序，将在第十四章“激活块设备驱动程序”一节给予描述。 |
+| ksoftirqd       | 运行tasklet(参看第四章“软中断及tasklet”一节)。系统中每个CPU都有这样一个内核线程。 |
 
 ### 撤销进程
 
+很多进程终止了它们本该执行的代码，从这种意义上说，这些进程“死”了。当这种情况发生时，必须通知内核以便内核释放进程所拥有的资源，包括内存、打开文件及其他我们在本书中讲到的零碎东西，如信号量。
+
+进程终止的一般方式是调用exit()库函数，该函数释放c函数库所分配的资源，执行编程者所注册的每个函数，并结束从系统回收进程的那个系统调用。exit()函数可能由编程者显式地插入。另外，C编译程序总是把exit()函数插入到main()函数的最后一条语句之后。
+
+内核可以有选择地强迫整个线程组死掉。这发生在以下两种典型情况下：
+
+- 当进程接收到一个不能处理或忽视的信号时(参见十一章)
+- 当内核正在代表进程运行时在内核态产生一个不可恢复的CPU异常时(参见第四章)。
+
 #### 进程终止
+
+在Linux 2.6中有两个终止用户态应用的系统调用：
+
+- exit_grpup()系统调用，它终止整个线程组，即整个基于多线程的应用。do_group_exit()是实现这个系统调用的主要内核函数。这是C库函数exit()应该调用的系统调用。
+- exit()系统调用，它终止某一个线程，而不管该线程所属线程组中的所有其他进程。do_exit()是实现这个系统调用的主要内核函数。这是被诸如pthread_exit()的Linux线程库的函数所调用的系统调用。
 
 #### do_group_exit()函数
 
+do_group_exit()函数杀死属于current线程组的所有进程。它接受进程终止代号作为参数，进程终止代号可能是系统调用exit_group()(正常结束)指定的一个值，也可能是内核提供的一个错误代号(异常结束)。该函数执行下述操作：
+
+1. 检查退出进程的SIGNAL_GROUP_EXIT标志是否不为0，如果不为0，说明内核已经开始为线程组执行退出的过程。在这种情况下，就把存放在current->signal->group_exit_code中的值当作退出码，然后跳转到第4步。
+
+2. 否则，设置进程的SIGNAL_GROUP_EXIT标志并把终止代号存放到current->signal->group_exit_code字段。
+
+3. 调用zap_other_threads()函数杀死current线程组中的其他进程(如果有的话)。为了完成这个步骤，函数扫描与current->tgid对应的PIDTYPE_TGID类型的散列表中的每个PID链表，向表中所有不同于current的进程发送SIGKILL信号(参
+   见第十一章)，结果，所有这样的进程都将执行do_exit()函数，从而被杀死。
+
+4. 调用do_exit()函数，把进程的终止代号传递给它。do_exit()杀死进程而且不再返回。
+
 #### do_exit()函数
 
+所有进程的终止都是由do_exit()函数来处理的，这个函数从内核数据结构中删除对终止进程的大部分引用。do_exit()函数接受进程的终止代号作为参数并执行下列操作：
+
+1. 把进程描述符的flag字段设置为PF_EXITING标志，以表示进程正在被删除。
+2. 如果需要，通过函数del_timer_sync()(参见第六章)从动态定时器队列中删除进程描述符。
+3. 分别调用exit_mm(),exit_sem(),\_\_exit_files(),\_\_exit_fs(),exit_namespace()和exit_thread()函数从进程描述符中分离出与分页、信号量、文件系统、打开文件描述符、命名空间以及I/O权限位图相关的数据结构。如果没有其他进程共享这些数据结构，那么这些函数还删除所有这些数据结构中。
+4. 如果实现了被杀死进程的执行域和可执行格式(参见第二十章)的内核函数包含在内核模块中，则函数递减它们的使用计数器。
+5. 把进程描述符的exit_code字段设置成进程的终止代号，这个值要么是_exit()或exit_group()系统调用参数(正常终止)，要么是由内核提供的一个错误代号(异常终止)。
+6. 调用exit_notify()函数执行下面的操作：
+   - 更新父进程和子进程的亲属关系。如果同一线程组中有正在运行的进程，就让终止进程所创建的所有子进程都变成同一线程组中另外一个进程的子进程，否则让它们成为init的子进程。
+   - 检查被终止进程其进程描述符的exit_signal字段是否不等于-1，并检查进程是否是其所属进程组的最后一个成员(注意:正常进程都会具有这些条件，参见前面“clone(),fork()和vfork()系统调用”一节中对copy_process()的描述，第16步)。在这种情况下，函数通过给正被终止进程的父进程发送一个信号(通常是SIGCHLD)，以通知父进程子进程死亡。
+   - 否则，也就是exit_signal字段等于-1，或者线程组中还有其他进程，那么只要进程正在被跟踪，就向父进程发送一个SIGCHLD信号(在这种情况下，父进程是调试程序，因而，向它报告轻量级进程死亡的信息)。
+   - 如果进程描述符的exit_signal字段等于-1，而且进程没有被跟踪，就把进程描述符的exit_state字段置为EXIT_DEAD，然后调用release_task()回收进程的其他数据结构占用的内存，并递减进程描述符的使用计数器(见下一节)。使用记数器变为1(参见copy_process()函数的第3f步)，以使进程描述符本身正好不会被释放。
+   - 否则，如果进程描述符的exit_signal字段不等于-1，或进程正在被跟踪，就把exit_state字段置为EXIT_ZOMBIE。在下一节我们将看到如何处理僵死进程。
+   - 把进程描述符的flags字段设置为PF_DEAD标志(参见第七章“schedule()函数”一节)。
+7. 调用schedule()函数(参见第七章)选择一个新进程运行。调度程序忽略处于EXIT_ZOMBIE状态的进程，所以这种进程正好在schedule()中的宏switch_to被调用之后停止执行。正如在第七章我们将看到的:调度程序将检查被替换的僵死进程描述符的PF_DEAD标志并递减使用计数器，从而说明进程不再存活的事实。
+
+
 #### 进程删除
+
+Unix允许进程查询内核以获得其父进程的PID,或者其任何子进程的执行状态。例如，进程可以创建一个子进程来执行特定的任务，然后调用诸如wait()这样的一些库函数检查子进程是否终止。如果子进程已经终止，那么，它的终止代号将告诉父进程这个任务是否已成功地完成。
+
+为了遵循这些设计选择，不允许Unix内核在进程一终止后就丢弃包含在进程描述符字段中的数据。只有父进程发出了与被终止的进程相关的wait()类系统调用之后，才允许这样做。这就是引入僵死状态的原因:尽管从技术上来说进程已死，但必须保存它的描述符，直到父进程得到通知。
+
+如果父进程在子进程结束之前结束会发生什么情况呢?在这种情况下，系统中会到处是僵死的进程，而且它们的进程描述符永久占据着RAM。如前所述，必须强迫所有的孤儿进程成为init进程的子进程来解决这个问题。这样，init进程在用wait()类系统调用检查其合法的子进程终止时，就会撤消僵死的进程。
+
+release_task()函数从僵死进程的描述符中分离出最后的数据结构；对僵死进程的处理有两种可能的方式：
+
+- 如果父进程不需要接收来自子进程的信号，就调用do_exit()。
+- 如果已经给父进程发送了一个信号，就调用wait4()或waitpid()系统调用。
+
+在后一种情况下，函数还将回收进程描述符所占用的内存空间，而在前一种情况下，内存的回收将由进程调度程序来完成(参见第七章)。该函数执行下述步骤：
+
+1. 递减终止进程拥有者的进程个数。这个值存放在本章前面提到的user_struct结构中(参见copy_process()的第4步)。
+2. 如果进程正在被跟踪，函数将它从调试程序的ptrace_children链表中删除，并让该进程重新属于初始的父进程。
+
+3. 调用\_\_exit_signal()删除所有的挂起信号并释放进程的signal_struct描述符。如果该描述符不再被其他的轻量级进程使用，函数进一步删除这个数据结构。此外，函数调用exit_itimers()从进程中剥离掉所有的POSIX时间间隔定时器。
+
+4. 调用\_\_exit_sighand()删除信号处理函数。
+
+5. 调用\_\_unhash_process() ,该函数依次执行下面的操作：
+   - 变量nr_threads减1。
+   - 两次调用detach_pid()，分别从PIDTYPE_PID和PIDTYPE_TGID类型的PID散列表中删除进程描述符。
+   - 如果进程是线程组的领头进程，那么再调用两次detach_pid()，从PIDTYPE_PGID和PIDTYPE_SID类型的散列表中删除进程描述符。
+   - 用宏REMOVE_LINKS从进程链表中解除进程描述符的链接。
+6. 如果进程不是线程组的领头进程，领头进程处于僵死状态，而且进程是线程组的最后一个成员，则该函数向领头进程的父进程发送一个信号，通知它进程已死亡。
+7. 调用sched_exit()函数来调整父进程的时间片(这一步在逻辑上作为对copy_process()第17步的补充)。
+8. 调用put_task_struct()递减进程描述符的使用计数器，如果计数器变为0，则函数终止所有残留的对进程的引用。
+   - 递减进程所有者的user_struct数据结构的使用计数器(\_\_count字段)(参见copy_process()的第5步)，如果使用计数器变为0，就释放该数据结构。
+   - 释放进程描述符以及thread_info描述符和内核态堆栈所占用的内存区域。
 
 ## 第4章 中断与异常
 
