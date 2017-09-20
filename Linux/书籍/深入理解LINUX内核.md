@@ -369,7 +369,7 @@ Unix内核做的工作远不止处理系统调用。实际上，可以有几种�
 
 - 进程调用系统调用。
 - 正在执行进程的CPU发出一个异常(exception)信号，异常是一些反常情况，例如一个无效的指令。内核代表产生异常的进程处理异常。
-- 外围设备向CPU发出一个中断(interrupt)信号以通知一个事件的发生，如一个要 求注意的请求、一个状态的变化或一个I/O操作已经完成等。每个中断信号都是由内核中的中断处理程序(interrupt handler)来处理的。因为外围设备与CPU异步操作，因此，中断在不可预知的时间发生。
+- 外围设备向CPU发出一个中断(interrupt)信号以通知一个事件的发生，如一个要求注意的请求、一个状态的变化或一个I/O操作已经完成等。每个中断信号都是由内核中的中断处理程序(interrupt handler)来处理的。因为外围设备与CPU异步操作，因此，中断在不可预知的时间发生。
 - 内核线程被执行。因为内核线程运行在内核态，因此必须认为其相应程序是内核的一部分。
 
 #### 进程实现
@@ -391,7 +391,7 @@ Unix内核做的工作远不止处理系统调用。实际上，可以有几种�
 
 所有的Unix内核都是可重入的(reentrant)，这意味着若干个进程可以同时在内核态下执行。当然，在单处理器系统上只有一个进程在真正运行，但是有许多进程可能在等待CPU或某一I/O操作完成时在内核态下被阻塞。例如，当内核代表某一进程发出一个读磁盘请求后，就让磁盘控制器处理这个请求并且恢复执行其他进程。当设备满足了读请求时，有一个中断就会通知内核，从而以前的进程可以恢复执行。
 
-提供可重入的一种方式是编写函数，以便这些函数只能修改局部变量，而不能改变全局数据结构，这样的函数叫可重入函数。但是可重入内核不仅仅局限于这样的可重入函数(尽管一些实时内核正是如此实现的)。相反，可重入内核可以包含非重入函数，并且利用锁机制保证一次只有一个进程执行一个非重人函数。
+提供可重入的一种方式是编写函数，以便这些函数只能修改局部变量，而不能改变全局数据结构，这样的函数叫可重入函数。但是可重入内核不仅仅局限于这样的可重入函数(尽管一些实时内核正是如此实现的)。相反，可重入内核可以包含非重入函数，并且利用锁机制保证一次只有一个进程执行一个非重入函数。
 
 如果一个硬件中断发生，可重入内核能挂起当前正在执行的进程，即使这个进程处于内核态。这种能力是非常重要的，因为这能提高发出中断的设备控制器的吞吐量。一旦设备已发出一个中断，它就一直等待直到CPU应答它为止。如果内核能够快速应答，设备控制器在CPU处理中断时就能执行其他任务。
 
@@ -408,7 +408,7 @@ Unix内核做的工作远不止处理系统调用。实际上，可以有几种�
 - 运行一个异常处理程序或系统调用处理程序(Excp)
 - 运行一个中断处理程序(Intr)
 
-![内核控制路径交错执行.jpg](https：//github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/%E5%86%85%E6%A0%B8%E6%8E%A7%E5%88%B6%E8%B7%AF%E5%BE%84%E4%BA%A4%E9%94%99%E6%89%A7%E8%A1%8C.jpg?raw=true)
+![内核控制路径交错执行.jpg](https://github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/%E5%86%85%E6%A0%B8%E6%8E%A7%E5%88%B6%E8%B7%AF%E5%BE%84%E4%BA%A4%E9%94%99%E6%89%A7%E8%A1%8C.jpg?raw=true)
 
 #### 进程地址空间
 
@@ -518,9 +518,9 @@ Unix在进程和它正在执行的程序之间做出一个清晰的划分。fork
 
 _exit()系统调用终止一个进程。内核对这个系统调用的处理是通过释放进程所拥有的资源并向父进程发送SIGCHILD信号(默认操作为忽略)来实现的。
 
-##### 任死进程(zombie process)
+##### 僵死进程(zombie process)
 
-父进程如何查询其子进程是否终止了呢?wait4()系统调用允许进程等待，直到其中的一个子进程结束.它返回已终止子进程的进程标识符(Process ID，  PID)。
+父进程如何查询其子进程是否终止了呢?wait4()系统调用允许进程等待，直到其中的一个子进程结束。它返回已终止子进程的进程标识符(Process ID，  PID)。
 
 内核在执行这个系统调用时，检查子进程是否已经终止。引入僵死进程的特殊状态是为了表示终止的进程：父进程执行完wait4()系统调用之前，进程就一直停留在那种状态。系统调用处理程序从进程描述符字段中获取有关资源使用的一些数据；一旦得到数据，就可以释放进程描述符。当进程执行wait4()系统调用时如果没有子进程结束，内核就通常把该进程设置成等待状态，一直到子进程结束。
 
@@ -628,7 +628,7 @@ sync()系统调用把所有“脏”的缓冲区(即缓冲区的内容与对应�
 
 下图说明了设备驱动程序与内核其他部分及进程之间的接口。
 
-![设备驱动程序接口.jpg](https：//github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/%E8%AE%BE%E5%A4%87%E9%A9%B1%E5%8A%A8%E7%A8%8B%E5%BA%8F%E6%8E%A5%E5%8F%A3.jpg?raw=true)
+![设备驱动程序接口.jpg](https://github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/%E8%AE%BE%E5%A4%87%E9%A9%B1%E5%8A%A8%E7%A8%8B%E5%BA%8F%E6%8E%A5%E5%8F%A3.jpg?raw=true)
 
 一些用户程序(P)希望操作硬件设备。这些程序就利用常用的、与文件相关的系统调用及在/dev目录下能找到的设备文件向内核发出请求。实际上，设备文件是设备驱动程序接口中用户可见的部分。每个设备文件都有专门的设备驱动程序，它们由内核调用以执行对硬件设备的请求操作。
 
@@ -658,9 +658,7 @@ sync()系统调用把所有“脏”的缓冲区(即缓冲区的内容与对应�
 
 一个逻辑地址由两部分组成：段标识符和指定段内相对地址的偏移量。段标识符是一个16位长的字段，称为段选择符（Segment Selector），而偏移量是一个32位长的字段。
 
-
-
-![段选择符.jpg](https：//github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/%E6%AE%B5%E9%80%89%E6%8B%A9%E7%AC%A6.jpg?raw=true)
+![段选择符.jpg](https://github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/%E6%AE%B5%E9%80%89%E6%8B%A9%E7%AC%A6.jpg?raw=true)
 
 为了快速方便地找到段选择符，处理器提供段寄存器，段寄存器的唯一目的是 存放段选择符。这些段寄存器称为cs，  ss， ds， es，  fs和gs。尽管只有6个段寄存器，但程序可以把同一个段寄存器用于不同的目的，方法是先将其值保存在内存中，用完后再恢复。
 6个段寄存器中3个有专门的用途：
@@ -676,9 +674,9 @@ cs寄存器还有一个很重要的功能：它含有一个 两位的字段，�
 
 通常只定义一个GDT，而每个进程除了存放在GDT中段之外如果还需要创建附加的段，就可以有自己的LDT。GDT在主存中的地址和大小存放在gdtr控制寄存器中，当前正被使用的LDT地址和大小放在ldtr控制寄存器中。
 
-![段描述符通用格式.jpg](https：//github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/%E6%AE%B5%E6%8F%8F%E8%BF%B0%E7%AC%A6%E9%80%9A%E7%94%A8%E6%A0%BC%E5%BC%8F.jpg?raw=true)
+![段描述符通用格式.jpg](https://github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/%E6%AE%B5%E6%8F%8F%E8%BF%B0%E7%AC%A6%E9%80%9A%E7%94%A8%E6%A0%BC%E5%BC%8F.jpg?raw=true)
 
-![几种段描述符格式.jpg](https：//github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/%E5%87%A0%E7%A7%8D%E6%AE%B5%E6%8F%8F%E8%BF%B0%E7%AC%A6%E6%A0%BC%E5%BC%8F.jpg?raw=true)
+![几种段描述符格式.jpg](https://github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/%E5%87%A0%E7%A7%8D%E6%AE%B5%E6%8F%8F%E8%BF%B0%E7%AC%A6%E6%A0%BC%E5%BC%8F.jpg?raw=true)
 
 | 字段名   | 描述                                       |
 | ----- | ---------------------------------------- |
@@ -694,7 +692,7 @@ cs寄存器还有一个很重要的功能：它含有一个 两位的字段，�
 
 代码段和数据段描述符类型如下表：
 
-![代码段和数据段描述符类型.png](https：//github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/%E4%BB%A3%E7%A0%81%E6%AE%B5%E5%92%8C%E6%95%B0%E6%8D%AE%E6%AE%B5%E6%8F%8F%E8%BF%B0%E7%AC%A6%E7%B1%BB%E5%9E%8B.png?raw=true)
+![代码段和数据段描述符类型.png](https://github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/%E4%BB%A3%E7%A0%81%E6%AE%B5%E5%92%8C%E6%95%B0%E6%8D%AE%E6%AE%B5%E6%8F%8F%E8%BF%B0%E7%AC%A6%E7%B1%BB%E5%9E%8B.png?raw=true)
 
 代码段描述符：代表一个代码段，它可以放在GDT或LDT中。该描述符置S标志为1(非系统段)。
 
@@ -718,7 +716,7 @@ cs寄存器还有一个很重要的功能：它含有一个 两位的字段，�
 
 为了加速逻辑地址到线性地址的转换，80x86处理器提供一种附加的非编程的寄存器（不能被编程者设置的寄存器），供6个可编程的段寄存器使用。每一个非编程的寄存器含有8个字节的段描述符，由相应的段寄存器中的段选择符来指定。每当一个段选择符被装入段寄存器时，相应的段描述符就由内存装入到对应的非编程CPU寄存器。之后，针对那个段的逻辑地址转换就可以不访问主存中的GDT或LDT，处理器只需直接引用存放段描述符的CPU寄存器即可。仅当段寄存器的内容改变时，才有必要访问GDT或LDT。
 
-![段选择符和段描述符.jpg](https：//github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/%E6%AE%B5%E9%80%89%E6%8B%A9%E7%AC%A6%E5%92%8C%E6%AE%B5%E6%8F%8F%E8%BF%B0%E7%AC%A6.jpg?raw=true)
+![段选择符和段描述符.jpg](https://github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/%E6%AE%B5%E9%80%89%E6%8B%A9%E7%AC%A6%E5%92%8C%E6%AE%B5%E6%8F%8F%E8%BF%B0%E7%AC%A6.jpg?raw=true)
 
 由于一个段描述符是8字节，因此它在GDT或LDT内的相对地址是由段选择符的最高13位（index）的值乘以8得到的。例如：如果GDT在0x0002 0000（这个值保存在gdtr寄存器中），且由段选择符所指定的索引号为2，那么相应的段描述符地址是0x0002 0000 + (2 * 8)，或0x0002 0010。
 
@@ -732,7 +730,7 @@ GDT的第一项总是设为0。这就确保空段选择符的逻辑地址会被�
 - 从段选择符的index字段计算段描述符的地址，index字段的值乘以8（一个段描述符的大小），这个结果与gdtr或ldtr寄存器中的内容相加。
 - 把逻辑地址的偏移量与段描述符Base字段的值相加就得到了线性地址。
 
-![逻辑地址转换.jpg](https：//github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/%E9%80%BB%E8%BE%91%E5%9C%B0%E5%9D%80%E8%BD%AC%E6%8D%A2.jpg?raw=true)
+![逻辑地址转换.jpg](https://github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/%E9%80%BB%E8%BE%91%E5%9C%B0%E5%9D%80%E8%BD%AC%E6%8D%A2.jpg?raw=true)
 
 有了与段寄存器相关的不可编程寄存器，只有当段寄存器的内容被改变时才需要执行前两个操作。
 
@@ -782,7 +780,7 @@ G为1，粒度为4KB，Limit为 0xfffff，则空间为 4GB
 
 下图是GDT的布局示意图。每个GDT包含18个段描述符和14个空的，未使用的，或保留的项。插入未使用的项的目的是为了使经常一起访问的描述符能够处于同一个32字节的硬件高速缓存行中。
 
-![全局描述符表.jpg](https：//github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/%E5%85%A8%E5%B1%80%E6%8F%8F%E8%BF%B0%E7%AC%A6%E8%A1%A8.jpg?raw=true)
+![全局描述符表.jpg](https://github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/%E5%85%A8%E5%B1%80%E6%8F%8F%E8%BF%B0%E7%AC%A6%E8%A1%A8.jpg?raw=true)
 
 每一个GDT中包含的18个段描述符指同下列的段：
 
@@ -838,7 +836,7 @@ G为1，粒度为4KB，Limit为 0xfffff，则空间为 4GB
 
 正在使用的页目录的物理地址存放在控制寄存器cr3中。线性地址内的Directory字段决定页目录中的目录项，而目录项指向适当的页表。地址的Table字段依次又决定页表中的表项，而表项含所有页所在页框的物理地址。Offset字段决定页框内的相对位置。由于它是12位长，故每一页含有4096字节的数据。
 
-![x86处理器的分页.jpg](https：//github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/x86%E5%A4%84%E7%90%86%E5%99%A8%E7%9A%84%E5%88%86%E9%A1%B5.jpg?raw=true)
+![x86处理器的分页.jpg](https://github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/x86%E5%A4%84%E7%90%86%E5%99%A8%E7%9A%84%E5%88%86%E9%A1%B5.jpg?raw=true)
 
 Directory字段和Table字段都是10位长，因此页目录和页表都可以多达1024项。那么一个页目录可以寻址到高达1024 * 1024 * 4096 = 2^32^个存储单元，这和你对32位地址所期望的一样。
 
@@ -943,7 +941,7 @@ Intel为了支持PAE已经改变了分页机制：
 
 高速缓存再被细分为行的子集。在一种极端的情况下，高速缓存可以是直接映射的(direct mapped)，这时主存中的一个行总是存放在高速缓存中完全相同的位置。在另一种极端情况下，高速缓存是充分关联的(fully  associative)，这意味着主存中的任意一个行可以存放在高速缓存中的任意位置。但是大多数高速缓存在某种程度上是N-路组关联的(N-way set associative)，意味着主存中的任意一个行可以存放在高速缓存N行中的任意一行中。例如，内存中的一个行可以存放到一个2路组关联高速缓存两个不同的行中。
 
-![处理器硬件高速缓存.png](https：//github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/%E5%A4%84%E7%90%86%E5%99%A8%E7%A1%AC%E4%BB%B6%E9%AB%98%E9%80%9F%E7%BC%93%E5%AD%98.png?raw=true)
+![处理器硬件高速缓存.png](https://github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/%E5%A4%84%E7%90%86%E5%99%A8%E7%A1%AC%E4%BB%B6%E9%AB%98%E9%80%9F%E7%BC%93%E5%AD%98.png?raw=true)
 
 高速缓存单元插在分页单元和主内存之间。它包含一个硬件高速缓存内存(hardware cache memory)和一个高速缓存控制器(cache controller) 。高速缓存内存存放内存中真正的行。高速缓存控制器存放一个表项数组，每个表项对应高速缓存内存中的一个行。每个表项有一个标签（tag）和描述高速缓存行状态的几个标志（flag）。这个标签由一些位组成，这些位让高速缓存控制器能够辨别由这个行当前所映射的内存单元。这种内存物理地址通常分为3组：最高几位对应标签，中间几位对应高速缓存控制器的子集索引，最低几位对应行内的偏移量。
 
@@ -976,7 +974,7 @@ Linux采用了一种同时适用于32位和64位系统的普通分页模型。�
 - 页中级目录(Page Middle Directory )
 - 页表(Page Table)
 
-![Linux分页模式.jpg](https：//github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/Linux%E5%88%86%E9%A1%B5%E6%A8%A1%E5%BC%8F.jpg?raw=true)
+![Linux分页模式.jpg](https://github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/Linux%E5%88%86%E9%A1%B5%E6%A8%A1%E5%BC%8F.jpg?raw=true)
 
 页全局目录包含若干页上级目录的地址，页上级目录又依次包含若干页中间目录的地址，而页中间目录又包含若干页表的地址。每一个页表项指向一个页框。线性地址因此被分成五个部分。每一部分的大小与具体的计算机体系结构有关。
 
@@ -1155,7 +1153,7 @@ pte_t， pmd_t， pud_t和pgd_t分别描述页表项、页中间目录项、页�
 
 为了避免把内核装入一组不连续的页框里，Linux更愿跳过RAM的第一个MB。明确地说，Linux用PC体系结构未保留的页框来动态存放所分配的页。下图显示了Linux怎样填充前3MB的RAM：
 
-![Linux2.6的前768个页框（3MB）.jpg](https：//github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/Linux2.6%E7%9A%84%E5%89%8D768%E4%B8%AA%E9%A1%B5%E6%A1%86%EF%BC%883MB%EF%BC%89.jpg?raw=true)
+![Linux2.6的前768个页框（3MB）.jpg](https://github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/Linux2.6%E7%9A%84%E5%89%8D768%E4%B8%AA%E9%A1%B5%E6%A1%86%EF%BC%883MB%EF%BC%89.jpg?raw=true)
 
 符号\_text对应于物理地址0x0010 0000，表示内核代码第一个字节的地址。内核代码的结束位代由另外一个类似的符号\_etext表示。内核数据分为两组：初始化过的数据的和没有初始化的数据。初始化过的数据在\_etext后开始，在\_edata处结束。紧接着是未初始化的数据并以\_end结束。
 
@@ -1489,7 +1487,7 @@ POSIX兼容的多线程应用程序由支持“线程组”的内核来处理。
 
 为了管理进程，内核必须对每个进程所做的事情进行清楚的描述。例如，内核必须知道进程的优先级，它是正在CPU上运行还是因某些事件而被阻塞，给它分配了什么样的地址空间，允许它访问哪个文件等等。这正是进程描述符(process descriptor)的作用——进程描述符都是task struct类型结构，它的字段包含了与一个进程相关的所有信息。它不仅包含了很多进程属性的字段，而且一些字段还包括了指向其他数据结构的指针，依此类推。
 
-![Linux进程描述符.png](https：//github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/Linux%E8%BF%9B%E7%A8%8B%E6%8F%8F%E8%BF%B0%E7%AC%A6.png?raw=true)
+![Linux进程描述符.png](https://github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/Linux%E8%BF%9B%E7%A8%8B%E6%8F%8F%E8%BF%B0%E7%AC%A6.png?raw=true)
 
 #### 进程状态
 
@@ -1536,7 +1534,7 @@ Linux把不同的PID与系统中每个进程或轻量级进程相关联(多处�
 下图显示了在2页(8KB)内存区中存放两种数据结构的方式。线程描述符驻留于这
 个内存区的开始，而栈从末端向下增长。该图还显示了分别通过task和thread_info字段使thread_info结构与task_struct结构互相关联。
 
-![进程内核栈.jpg](https：//github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/%E8%BF%9B%E7%A8%8B%E5%86%85%E6%A0%B8%E6%A0%88.jpg?raw=true)
+![进程内核栈.jpg](https://github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/%E8%BF%9B%E7%A8%8B%E5%86%85%E6%A0%B8%E6%A0%88.jpg?raw=true)
 
 
 esp寄存器是CPU栈指针，用来存放栈顶单元的地址。在80x86系统中，栈起始于末端，并朝这个内存区开始的方向增长。从用户态刚切换到内核态以后，进程的内核栈总是空的，因此，esp寄存器指向这个栈的顶端。
