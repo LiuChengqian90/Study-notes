@@ -716,7 +716,7 @@ put_cpu_var(ptr);
 
 - 可执行文件代码的内存映射，称为代码段（text section）。
 - 可执行文件的“已初始化”全局变量的内存映射，称为数据段（data section）。
-- 包含“未初始化”全局变量，也就是bss段（Block Started by Symbol）的零页(页面中的信息全部为0值，所以可用于映射bss段等目的)的内存映射。
+- 包含“未初始化”全局变量，也就是bss段（Block Started by Symbol，符号开始的块）的零页(页面中的信息全部为0值，所以可用于映射bss段等目的)的内存映射。
 - 用于进程用户空间栈（不要和进程内核栈混淆，进程的内核栈独立存在并由内核维护）的零页的内存映射。
 - 每一个诸如C库或动态连接程序等共享库的代码段、数据段和bss也会被载入进程的地址空间。
 - 任何内存映射文件。
@@ -965,9 +965,264 @@ mm_rb域使用红-黑树连接所有的内存区域对象。mm_rb域指向红-�
 
 链表用于需要追历全部节点的时候，而红-黑树适用于在地址空间中定位特定内存区域的时候。内核为了内存区域上的各种不同操作都能获得高性能，所以同时使用了这两种数据结构。
 
-可以使用/proc文件系统和pmap(1)根据查看指定进程的内存空间和其中所含的内存区域。/proc/<pid>/maps。
+可以使用/proc文件系统和pmap(1)根据查看指定进程的内存空间和其中所含的内存区域。下面列出某个进程地址空间中包含的内存区域。其中有代码段、数据段和bss段等。若进程与C库动态链接，那么该地址空间中还分别包含libc.so和ld.so对应的上述三种内存区域。此外，地址空间中还要包含进程栈对应的内存区域。
+
+```c
+#include<stdio.h>
+#include<stdlib.h>
+
+int  a;
+int  b=1;
+
+void main()
+{
+    int  n = 0;
+    char *p1 = NULL;
+    char *p2 = NULL;
+    const int s = 10;
+    p1 = (char*)malloc(200);
+    p2 = "hello";
+
+    printf("main  %p\n",main);
+    printf("未初始化 a   %p\n",&a);
+    printf("初始化   b   %p\n",&b);
+    printf("局部变量 n   %p\n",&n);
+    printf("动态内存 p1  %p\n",p1);
+    printf("常量     s   %p\n",&s);
+    printf("常字符串 p2  %p\n",p2);
+
+    while(1)
+    {}
+}
+```
+
+```shell
+[root@lcq-com centos]# ./test 
+main  0x40057d
+未初始化 a   0x601044
+初始化   b   0x60103c
+局部变量 n   0x7ffe5de20b0c
+动态内存 p1  0x11d2010
+常量     s   0x7ffe5de20b08
+常字符串 p2  0x4006e0
+
+[root@lcq-com centos]# ps aux| grep test
+root     22611 96.0  0.0   4288   344 pts/0    R+   03:22   0:22 ./test
+root     22669  0.0  0.0 112644   968 pts/1    R+   03:22   0:00 grep --color=auto test
+[root@lcq-com centos]# pmap 22611
+22611:   ./test
+0000000000400000      4K r-x-- test
+0000000000600000      4K r---- test
+0000000000601000      4K rw--- test
+00000000011d2000    132K rw---   [ anon ]
+00007f73a174c000   1756K r-x-- libc-2.17.so
+00007f73a1903000   2044K ----- libc-2.17.so
+00007f73a1b02000     16K r---- libc-2.17.so
+00007f73a1b06000      8K rw--- libc-2.17.so
+00007f73a1b08000     20K rw---   [ anon ]
+00007f73a1b0d000    128K r-x-- ld-2.17.so
+00007f73a1d21000     12K rw---   [ anon ]
+00007f73a1d2b000      8K rw---   [ anon ]
+00007f73a1d2d000      4K r---- ld-2.17.so
+00007f73a1d2e000      4K rw--- ld-2.17.so
+00007f73a1d2f000      4K rw---   [ anon ]
+00007ffe5de02000    132K rw---   [ stack ]
+00007ffe5de58000      8K r-x--   [ anon ]
+ffffffffff600000      4K r-x--   [ anon ]
+ total             4292K
+[root@lcq-com centos]# cat /proc/22611/maps 
+00400000-00401000 r-xp 00000000 fd:01 37818796                           /home/centos/test
+00600000-00601000 r--p 00000000 fd:01 37818796                           /home/centos/test
+00601000-00602000 rw-p 00001000 fd:01 37818796                           /home/centos/test
+011d2000-011f3000 rw-p 00000000 00:00 0                                  [heap]
+7f73a174c000-7f73a1903000 r-xp 00000000 fd:01 38400                      /usr/lib64/libc-2.17.so
+7f73a1903000-7f73a1b02000 ---p 001b7000 fd:01 38400                      /usr/lib64/libc-2.17.so
+7f73a1b02000-7f73a1b06000 r--p 001b6000 fd:01 38400                      /usr/lib64/libc-2.17.so
+7f73a1b06000-7f73a1b08000 rw-p 001ba000 fd:01 38400                      /usr/lib64/libc-2.17.so
+7f73a1b08000-7f73a1b0d000 rw-p 00000000 00:00 0 
+7f73a1b0d000-7f73a1b2d000 r-xp 00000000 fd:01 35193                      /usr/lib64/ld-2.17.so
+7f73a1d21000-7f73a1d24000 rw-p 00000000 00:00 0 
+7f73a1d2b000-7f73a1d2d000 rw-p 00000000 00:00 0 
+7f73a1d2d000-7f73a1d2e000 r--p 00020000 fd:01 35193                      /usr/lib64/ld-2.17.so
+7f73a1d2e000-7f73a1d2f000 rw-p 00021000 fd:01 35193                      /usr/lib64/ld-2.17.so
+7f73a1d2f000-7f73a1d30000 rw-p 00000000 00:00 0 
+7ffe5de02000-7ffe5de23000 rw-p 00000000 00:00 0                          [stack]
+7ffe5de58000-7ffe5de5a000 r-xp 00000000 00:00 0                          [vdso]
+ffffffffff600000-ffffffffff601000 r-xp 00000000 00:00 0                  [vsyscall]
+```
+
+/proc下maps每行数据格式如下：
+
+```c
+开始-结束	访问权限	偏移	主设备号：次设备号	i节点		文件
+```
+
+前两行为可执行对象的代码段、数据段（第三行或为bss段），之后为链接程序的代码段、数据段和bss段，倒数第三行(stack)是进程的栈，后两行 vdso、vsyscall 为系统的快速调用。
+
+注意，代码段具有我们所要求的可读且可执行权限；另一方面，数据段和bss(它们都包含全局数据变量)具有可读、可写但不可执行权限。而堆栈则可读、可写，甚至还可执行——虽然这点并不常用到。
+
+该进程的全部地址空间大约为4292KB，但是只有大约504KB的内存区域是可写和私有的（物理内存 ，pmap -X pid）。如果一片内存范围是共享的或不可写的，那么内核只需要在内存中为文件(backing file)保留一份映射。对于共享映射来说，这样做没什么特别的，但是对于不可写内存区域也这样做，就有些让人奇怪了。如果考虑到映射区域不可写意味着该区域不可被改变(映射只用来读)，就应该清楚只把该映像读入一次是很安全的。所以C库在物理内存中仅仅需要占用316KB空间，而不需要为每个使用C库的进程在内存中都保存一个316KB的空间。进程访问了4292KB的数据和代码空间，然而仅仅消耗了504KB的物理内存，可以看出利用这种共享不可写内存的方法节约了大量的内存空间。
+
+注意没有映射文件的内存区域的设备标志为00:00，索引接点标志也为0，这个区域就是零页——零页映射的内容全为零。如果将零页映射到可写的内存区域，那么该区域将全被初始化为0。这是零页的一个重要用处，而bss段需要的就是全0的内存区域。由于内存未被共享，所以只要一有进程写该处数据，那么该处数据就将被拷贝出来(就是我们所说的写时拷贝)，然后才被更新。
 
 内核时常需要在某个内存区域上执行一些操作，比如某个指定地址是否包含在某个内存区域中。这类操作非常频繁，为了方便执行这类对内存区域的操作，内核定义了许多的辅助函数。它们都声明在文件<linux/mm.h>中。
+
+进程编译后可执行文件，分布的段（代码段、数据段、bss段）如下所示：
+
+```shell
+[root@lcq-com centos]# readelf -s test
+
+Symbol table '.dynsym' contains 5 entries:
+   Num:    Value          Size Type    Bind   Vis      Ndx Name
+     0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT  UND 
+     1: 0000000000000000     0 FUNC    GLOBAL DEFAULT  UND printf@GLIBC_2.2.5 (2)
+     2: 0000000000000000     0 FUNC    GLOBAL DEFAULT  UND __libc_start_main@GLIBC_2.2.5 (2)
+     3: 0000000000000000     0 NOTYPE  WEAK   DEFAULT  UND __gmon_start__
+     4: 0000000000000000     0 FUNC    GLOBAL DEFAULT  UND malloc@GLIBC_2.2.5 (2)
+
+Symbol table '.symtab' contains 68 entries:
+   Num:    Value          Size Type    Bind   Vis      Ndx Name
+     0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT  UND 
+     1: 0000000000400238     0 SECTION LOCAL  DEFAULT    1 
+     2: 0000000000400254     0 SECTION LOCAL  DEFAULT    2 
+     3: 0000000000400274     0 SECTION LOCAL  DEFAULT    3 
+     4: 0000000000400298     0 SECTION LOCAL  DEFAULT    4 
+     5: 00000000004002b8     0 SECTION LOCAL  DEFAULT    5 
+     6: 0000000000400330     0 SECTION LOCAL  DEFAULT    6 
+     7: 0000000000400376     0 SECTION LOCAL  DEFAULT    7 
+     8: 0000000000400380     0 SECTION LOCAL  DEFAULT    8 
+     9: 00000000004003a0     0 SECTION LOCAL  DEFAULT    9 
+    10: 00000000004003b8     0 SECTION LOCAL  DEFAULT   10 
+    11: 0000000000400418     0 SECTION LOCAL  DEFAULT   11 
+    12: 0000000000400440     0 SECTION LOCAL  DEFAULT   12 
+    13: 0000000000400490     0 SECTION LOCAL  DEFAULT   13 
+    14: 00000000004006c4     0 SECTION LOCAL  DEFAULT   14 
+    15: 00000000004006d0     0 SECTION LOCAL  DEFAULT   15 
+    16: 000000000040076c     0 SECTION LOCAL  DEFAULT   16 
+    17: 00000000004007a0     0 SECTION LOCAL  DEFAULT   17 
+    18: 0000000000600e10     0 SECTION LOCAL  DEFAULT   18 
+    19: 0000000000600e18     0 SECTION LOCAL  DEFAULT   19 
+    20: 0000000000600e20     0 SECTION LOCAL  DEFAULT   20 
+    21: 0000000000600e28     0 SECTION LOCAL  DEFAULT   21 
+    22: 0000000000600ff8     0 SECTION LOCAL  DEFAULT   22 
+    23: 0000000000601000     0 SECTION LOCAL  DEFAULT   23 
+    24: 0000000000601038     0 SECTION LOCAL  DEFAULT   24 
+    25: 0000000000601040     0 SECTION LOCAL  DEFAULT   25 
+    26: 0000000000000000     0 SECTION LOCAL  DEFAULT   26 
+    27: 0000000000000000     0 FILE    LOCAL  DEFAULT  ABS crtstuff.c
+    28: 0000000000600e20     0 OBJECT  LOCAL  DEFAULT   20 __JCR_LIST__
+    29: 00000000004004c0     0 FUNC    LOCAL  DEFAULT   13 deregister_tm_clones
+    30: 00000000004004f0     0 FUNC    LOCAL  DEFAULT   13 register_tm_clones
+    31: 0000000000400530     0 FUNC    LOCAL  DEFAULT   13 __do_global_dtors_aux
+    32: 0000000000601040     1 OBJECT  LOCAL  DEFAULT   25 completed.6344
+    33: 0000000000600e18     0 OBJECT  LOCAL  DEFAULT   19 __do_global_dtors_aux_fin
+    34: 0000000000400550     0 FUNC    LOCAL  DEFAULT   13 frame_dummy
+    35: 0000000000600e10     0 OBJECT  LOCAL  DEFAULT   18 __frame_dummy_init_array_
+    36: 0000000000000000     0 FILE    LOCAL  DEFAULT  ABS test.c
+    37: 0000000000000000     0 FILE    LOCAL  DEFAULT  ABS crtstuff.c
+    38: 0000000000400890     0 OBJECT  LOCAL  DEFAULT   17 __FRAME_END__
+    39: 0000000000600e20     0 OBJECT  LOCAL  DEFAULT   20 __JCR_END__
+    40: 0000000000000000     0 FILE    LOCAL  DEFAULT  ABS 
+    41: 0000000000600e18     0 NOTYPE  LOCAL  DEFAULT   18 __init_array_end
+    42: 0000000000600e28     0 OBJECT  LOCAL  DEFAULT   21 _DYNAMIC
+    43: 0000000000600e10     0 NOTYPE  LOCAL  DEFAULT   18 __init_array_start
+    44: 0000000000601000     0 OBJECT  LOCAL  DEFAULT   23 _GLOBAL_OFFSET_TABLE_
+    45: 00000000004006c0     2 FUNC    GLOBAL DEFAULT   13 __libc_csu_fini
+    46: 0000000000000000     0 NOTYPE  WEAK   DEFAULT  UND _ITM_deregisterTMCloneTab
+    47: 0000000000601038     0 NOTYPE  WEAK   DEFAULT   24 data_start
+    48: 000000000060103c     4 OBJECT  GLOBAL DEFAULT   24 b
+    49: 0000000000601040     0 NOTYPE  GLOBAL DEFAULT   24 _edata
+    50: 00000000004006c4     0 FUNC    GLOBAL DEFAULT   14 _fini
+    51: 0000000000000000     0 FUNC    GLOBAL DEFAULT  UND printf@@GLIBC_2.2.5
+    52: 0000000000000000     0 FUNC    GLOBAL DEFAULT  UND __libc_start_main@@GLIBC_
+    53: 0000000000601038     0 NOTYPE  GLOBAL DEFAULT   24 __data_start
+    54: 0000000000000000     0 NOTYPE  WEAK   DEFAULT  UND __gmon_start__
+    55: 00000000004006d8     0 OBJECT  GLOBAL HIDDEN    15 __dso_handle
+    56: 00000000004006d0     4 OBJECT  GLOBAL DEFAULT   15 _IO_stdin_used
+    57: 0000000000400650   101 FUNC    GLOBAL DEFAULT   13 __libc_csu_init
+    58: 0000000000000000     0 FUNC    GLOBAL DEFAULT  UND malloc@@GLIBC_2.2.5
+    59: 0000000000601048     0 NOTYPE  GLOBAL DEFAULT   25 _end
+    60: 0000000000400490     0 FUNC    GLOBAL DEFAULT   13 _start
+    61: 0000000000601044     4 OBJECT  GLOBAL DEFAULT   25 a
+    62: 0000000000601040     0 NOTYPE  GLOBAL DEFAULT   25 __bss_start
+    63: 000000000040057d   210 FUNC    GLOBAL DEFAULT   13 main
+    64: 0000000000000000     0 NOTYPE  WEAK   DEFAULT  UND _Jv_RegisterClasses
+    65: 0000000000601040     0 OBJECT  GLOBAL HIDDEN    24 __TMC_END__
+    66: 0000000000000000     0 NOTYPE  WEAK   DEFAULT  UND _ITM_registerTMCloneTable
+    67: 0000000000400418     0 FUNC    GLOBAL DEFAULT   11 _init
+    
+    [root@lcq-com centos]# readelf -S test
+There are 30 section headers, starting at offset 0x1a28:
+Section Headers:
+  [Nr] Name              Type             Address           Offset
+       Size              EntSize          Flags  Link  Info  Align
+  [ 0]                   NULL             0000000000000000  00000000
+       0000000000000000  0000000000000000           0     0     0
+  [ 1] .interp           PROGBITS         0000000000400238  00000238
+       000000000000001c  0000000000000000   A       0     0     1
+  [ 2] .note.ABI-tag     NOTE             0000000000400254  00000254
+       0000000000000020  0000000000000000   A       0     0     4
+  [ 3] .note.gnu.build-i NOTE             0000000000400274  00000274
+       0000000000000024  0000000000000000   A       0     0     4
+  [ 4] .gnu.hash         GNU_HASH         0000000000400298  00000298
+       000000000000001c  0000000000000000   A       5     0     8
+  [ 5] .dynsym           DYNSYM           00000000004002b8  000002b8
+       0000000000000078  0000000000000018   A       6     1     8
+  [ 6] .dynstr           STRTAB           0000000000400330  00000330
+       0000000000000046  0000000000000000   A       0     0     1
+  [ 7] .gnu.version      VERSYM           0000000000400376  00000376
+       000000000000000a  0000000000000002   A       5     0     2
+  [ 8] .gnu.version_r    VERNEED          0000000000400380  00000380
+       0000000000000020  0000000000000000   A       6     1     8
+  [ 9] .rela.dyn         RELA             00000000004003a0  000003a0
+       0000000000000018  0000000000000018   A       5     0     8
+  [10] .rela.plt         RELA             00000000004003b8  000003b8
+       0000000000000060  0000000000000018  AI       5    12     8
+  [11] .init             PROGBITS         0000000000400418  00000418
+       000000000000001a  0000000000000000  AX       0     0     4
+  [12] .plt              PROGBITS         0000000000400440  00000440
+       0000000000000050  0000000000000010  AX       0     0     16
+  [13] .text             PROGBITS         0000000000400490  00000490
+       0000000000000234  0000000000000000  AX       0     0     16
+  [14] .fini             PROGBITS         00000000004006c4  000006c4
+       0000000000000009  0000000000000000  AX       0     0     4
+  [15] .rodata           PROGBITS         00000000004006d0  000006d0
+       000000000000009b  0000000000000000   A       0     0     8
+  [16] .eh_frame_hdr     PROGBITS         000000000040076c  0000076c
+       0000000000000034  0000000000000000   A       0     0     4
+  [17] .eh_frame         PROGBITS         00000000004007a0  000007a0
+       00000000000000f4  0000000000000000   A       0     0     8
+  [18] .init_array       INIT_ARRAY       0000000000600e10  00000e10
+       0000000000000008  0000000000000000  WA       0     0     8
+  [19] .fini_array       FINI_ARRAY       0000000000600e18  00000e18
+       0000000000000008  0000000000000000  WA       0     0     8
+  [20] .jcr              PROGBITS         0000000000600e20  00000e20
+       0000000000000008  0000000000000000  WA       0     0     8
+  [21] .dynamic          DYNAMIC          0000000000600e28  00000e28
+       00000000000001d0  0000000000000010  WA       6     0     8
+  [22] .got              PROGBITS         0000000000600ff8  00000ff8
+       0000000000000008  0000000000000008  WA       0     0     8
+  [23] .got.plt          PROGBITS         0000000000601000  00001000
+       0000000000000038  0000000000000008  WA       0     0     8
+  [24] .data             PROGBITS         0000000000601038  00001038
+       0000000000000008  0000000000000000  WA       0     0     4
+  [25] .bss              NOBITS           0000000000601040  00001040
+       0000000000000008  0000000000000000  WA       0     0     4
+  [26] .comment          PROGBITS         0000000000000000  00001040
+       000000000000002d  0000000000000001  MS       0     0     1
+  [27] .shstrtab         STRTAB           0000000000000000  0000106d
+       0000000000000108  0000000000000000           0     0     1
+  [28] .symtab           SYMTAB           0000000000000000  00001178
+       0000000000000660  0000000000000018          29    45     8
+  [29] .strtab           STRTAB           0000000000000000  000017d8
+       0000000000000250  0000000000000000           0     0     1
+Key to Flags:
+  W (write), A (alloc), X (execute), M (merge), S (strings), l (large)
+  I (info), L (link order), G (group), T (TLS), E (exclude), x (unknown)
+  O (extra OS processing required) o (OS specific), p (processor specific)
+```
+
+
 
 ### 操作内存区域
 

@@ -1,4 +1,4 @@
-## 第1章 绪论
+## 进程描述符中的state字段描述了进程当前所处的状态第1章 绪论
 
 Linux是类Unix (Unix-like)操作系统大家族中的一名成员。1991年，Linus Torvalds开发出最初的Linux，它作为一个适用于基于Intel 80386微处理器的IBM PC兼容机的操作系统。Linux最吸引人的一个优点就在于它不是商业操作系统：它的源代码在GNU公共许可证(General Pwblic License， GPL)下是开放的，任何人都可以获得源代码并研究它。
 
@@ -142,7 +142,7 @@ Linux这种新的开发模式意味着两种内核具有相同的版本号，但
 
 在单处理器系统上，只有一个进程能占用CPU，因此，在某一时刻只能有一个执行流。一般来说，CPU的个数总是有限的，因而只有少数几个进程能同时执行。操作系统中叫做调度程序(scheduler)的部分决定哪个进程能执行。一些操作系统只允许有非抢占式(nonpreemptable)进程，这就意味着，只有当进程自愿放弃CPU时，调度程序才被调用。但是，多用户系统中的进程必须是抢占式的(preemptable )。操作系统记录下每个进程占有的CPU时间，并周期性地激活调度程序。
 
-Unix是具有抢占式进程的多处理操作系统。即使没有用户登录，没有程序运行，也还是有几个系统进程在监视外围设备。尤其是，有几个进程在监听系统终端等待用户登录。当用户输人一个登录名，监听进程就运行一个程序来验证用户的口令。如果用户身份得到证实，那么监听进程就创建另一个进程来执行shell，此时在shell下可以输人命令。当一个图形化界面被激活时，有一个进程就运行窗口管理器，界面上的每个窗口通常都由一个单独的进程来执行。如果用户创建了一个图形化shell，那么，一个进程运行图形化窗口，而第二个进程运行用户可以输人命令的shell。对每一个用户命令，shell进程都创建执行相应程序的另一个进程。
+Unix是具有抢占式进程的多处理操作系统。即使没有用户登录，没有程序运行，也还是有几个系统进程在监视外围设备。尤其是，有几个进程在监听系统终端等待用户登录。当用户输入一个登录名，监听进程就运行一个程序来验证用户的口令。如果用户身份得到证实，那么监听进程就创建另一个进程来执行shell，此时在shell下可以输入命令。当一个图形化界面被激活时，有一个进程就运行窗口管理器，界面上的每个窗口通常都由一个单独的进程来执行。如果用户创建了一个图形化shell，那么，一个进程运行图形化窗口，而第二个进程运行用户可以输入命令的shell。对每一个用户命令，shell进程都创建执行相应程序的另一个进程。
 
 Unix操作系统采用进程/内核模式。每个进程都自以为它是系统中唯一的进程，可以独占操作系统所提供的服务。只要进程发出系统调用(即对内核提出请求)，硬件就会把特权模式由用户态变成内核态，然后进程以非常有限的目的开始一个内核过程的执行。这样，操作系统在进程的执行上下文中起作用，以满足进程的请求。一旦这个请求完全得到满足，内核过程将迫使硬件返回到用户态，然后进程从系统调用的下一条指令继续执行。
 
@@ -420,7 +420,7 @@ Unix内核做的工作远不止处理系统调用。实际上，可以有几种�
 
 如果同一个程序(比如说编辑程序)由几个用户同时使用，则这个程序只被装人内存一次，其指令由所有需要它的用户共享。当然，其数据不被共享，因为每个用户将有独立的数据。这种共享的地址空间由内核自动完成以节省内存。
 
-进程间也能共享部分地址空间，以实现一种进程间通信，这就是由System V引人并且已经被Linux支持的“共享内存”技术。
+进程间也能共享部分地址空间，以实现一种进程间通信，这就是由System V引入并且已经被Linux支持的“共享内存”技术。
 最后，Linux支持mmap()系统调用，该系统调用允许存放在块设备上的文件或信息的一部分映射到进程的部分地址空间。内存映射为正常的读写传送数据方式提供了另一种选择。如果同一文件由几个进程共享，那么共享它的每个进程地址空间都包含有它的内存映射。
 
 #### 同步和临界区
@@ -1485,7 +1485,7 @@ POSIX兼容的多线程应用程序由支持“线程组”的内核来处理。
 
 ### 进程描述符
 
-为了管理进程，内核必须对每个进程所做的事情进行清楚的描述。例如，内核必须知道进程的优先级，它是正在CPU上运行还是因某些事件而被阻塞，给它分配了什么样的地址空间，允许它访问哪个文件等等。这正是进程描述符(process descriptor)的作用——进程描述符都是task struct类型结构，它的字段包含了与一个进程相关的所有信息。它不仅包含了很多进程属性的字段，而且一些字段还包括了指向其他数据结构的指针，依此类推。
+为了管理进程，内核必须对每个进程所做的事情进行清楚的描述。例如，内核必须知道进程的优先级，它是正在CPU上运行还是因某些事件而被阻塞，给它分配了什么样的地址空间，允许它访问哪个文件等等。这正是进程描述符(process descriptor)的作用——进程描述符都是task_struct类型结构，它的字段包含了与一个进程相关的所有信息。它不仅包含了很多进程属性的字段，而且一些字段还包括了指向其他数据结构的指针，依此类推。
 
 ![Linux进程描述符.png](https://github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/Linux%E8%BF%9B%E7%A8%8B%E6%8F%8F%E8%BF%B0%E7%AC%A6.png?raw=true)
 
@@ -1496,12 +1496,12 @@ POSIX兼容的多线程应用程序由支持“线程组”的内核来处理。
 | 标志                              | 描述                                       |
 | ------------------------------- | ---------------------------------------- |
 | 可运行状态(TASK_RUNNING)             | 进程要么在CPU上执行，要么准备执行。                      |
-| 可中断的等待状态(TASK_INTERRUPTIBLE)    | 进程被挂起(睡眠)，直到某个条件变为真。产生一个硬件中断，释放进程正等待的系统资源，或传递一个信号都是可以唤醒进程的条件(把进程的状态放回到TASK_RUNNING)。 |
+| 可中断的等待状态(TASK_INTERRUPTIBLE)    | 进程被挂起(睡眠)，直到某个条件变为真。产生一个硬件中断，释放进程正等待的系统资源，或传递一个信号都是可以唤醒进程的条件(把进程的状态放回到TASK_RUNNING。 |
 | 不可中断的等待状态(TASK_UNINTERRUPTIBLE) | 与可中断的等待状态类似，但是，把信号传递到睡眠进程不能改变它的状态。这种状态在一些特定的情况下(进程必须等待，直到一个不能被中断的事件发生)是很有用的。例如，当进程打开一个设备文件，其相应的设备驱动程序开始探测相应的硬件设备时会用到这种状态。探测完成以前，设备驱动程序不能被中断，否则，硬件设备会处于不可预知的状态。 |
 | 暂停状态(TASK_STOPPED)              | 进程的执行被暂停。当进程接收到SIGSTOP， SIGTSTP，  SIGTTIN或SIGTTOU信号后，进入暂停状态。 |
 | 跟踪状态(TASK_TRACED)               | 进程的执行已由debugger程序暂停。当一个进程被另一个进程监控时(例如    debugger执行ptrace()系统调用监控一个测试程序)，任何信号都可以把这个进程置于TASK_TRACED状态。 |
 | 僵死状态(EXIT_ZOMBIE)               | 可存放在exit_state字段中。进程的执行被终止，但是，父进程还没有发布wait4()或waitpid()系统调用来返回有关死亡进程的信息。发布wait()类系统调用前，内核不能丢弃包含在死进程描述符中的数据，因为父进程可能还需要它。 |
-| 僵死撤消状态(EXIT_DEAD)               | 最终状态：由于父进程刚发出wait4()或waitpid()系统调用，因而进程由系统删除。为了防止其他执行线程在同一个进程上也执行wait()类系统调用(这是一种竞争条件)，而把进程的状态由僵死(EXIT_ZOMBIE)状态改为僵死撤消状态 (EXIT_DEAD)。 |
+| 僵死撤消状态(EXIT_DEAD)               | 可存放在exit_state字段中。最终状态：由于父进程刚发出wait4()或waitpid()系统调用，因而进程由系统删除。为了防止其他执行线程在同一个进程上也执行wait()类系统调用(这是一种竞争条件)，而把进程的状态由僵死(EXIT_ZOMBIE)状态改为僵死撤消状态 (EXIT_DEAD)。 |
 
 内核使用set_task_state和set_current_state宏分别设置指定进程的状态和当前执行进程的状态。此外，这些宏确保编译程序或CPU控制单元不把赋值操作与其他指令混合。混合指令的顺序有时会导致灾难性的后果。
 
@@ -1531,8 +1531,7 @@ Linux把不同的PID与系统中每个进程或轻量级进程相关联(多处�
 
 在第二章“Linux中的分段”一节中我们已经知道，内核态的进程访问处于内核数据段的栈，这个栈不同于用户态的进程所用的栈。因为内核控制路径使用很少的栈，因此只需要几千个字节的内核态堆栈。所以，对栈和thread_info结构来说，8KB足够了。不过，当使用一个页框存放内核态堆栈和thread_info结构时，内核要采用一些额外的栈以防止中断和异常的深度嵌弃而引起的溢出。
 
-下图显示了在2页(8KB)内存区中存放两种数据结构的方式。线程描述符驻留于这
-个内存区的开始，而栈从末端向下增长。该图还显示了分别通过task和thread_info字段使thread_info结构与task_struct结构互相关联。
+下图显示了在2页(8KB)内存区中存放两种数据结构的方式。线程描述符驻留于这个内存区的开始，而栈从末端向下增长。该图还显示了分别通过task和thread_info字段使thread_info结构与task_struct结构互相关联。
 
 ![进程内核栈.jpg](https://github.com/LiuChengqian90/Study-notes/blob/master/image/Linux/%E8%BF%9B%E7%A8%8B%E5%86%85%E6%A0%B8%E6%A0%88.jpg?raw=true)
 
@@ -1645,7 +1644,7 @@ static void enqueue_task(struct task_struct *p, prio_array_t *array)
 
 上图显示了一组进程间的亲属关系。进程P0接连创建了P1,P2和P3。进程P3又创建了P4。
 
-特别要说明的是，进程之间还存在其他关系:一个进程可能是一个进程组或登录会话的领头进程(参见第一章“进程管理”一节)，也可能是一个线程组的领头进程(参见本章前面“标识一个进程”一节)，它还可能跟踪其他进程的执行(参见第二二章“执行跟踪”一节)。下表列出了进程描述符中的一些字段，这些字段建立起了进程P和其他进程之间的关系。
+特别要说明的是，进程之间还存在其他关系:一个进程可能是一个进程组或登录会话的领头进程(参见第一章“进程管理”一节)，也可能是一个线程组的领头进程(参见本章前面“标识一个进程”一节)，它还可能跟踪其他进程的执行(参见第二十二章“执行跟踪”一节)。下表列出了进程描述符中的一些字段，这些字段建立起了进程P和其他进程之间的关系。
 
 | 字段名             | 说明                                   |
 | --------------- | ------------------------------------ |
@@ -1893,8 +1892,8 @@ wake_up、wake_up_nr、wake_up_all、wake_up_interruptible、wake_up_interruptib
 wake_up_interruptible_sync和wake_up_locked。从每个宏的名字我们可以明白其功能：
 
 - 所有宏都考虑到处于TASK_INTERRUPTIBLE状态的睡眠进程;如果宏的名字中不含字符串”interruptible"，那么处于TASK_UNINTERRUPTIBLE状态的睡眠进程也被考虑到。
-- 所有宏都唤醒具有请求状态的所有非互斥进程(参见上一项)。    名字中含有“nr”字符串的宏唤醒给定数的具有请求状态的互斥进程;这个数字是
-- 宏的一个参数。名字中含有“all”字符串的宏唤醒具有请求状态的所有互斥进程。最后，名字中不含“nr”或“all”字符串的宏只唤醒具有请求状态的一个互斥进程。
+- 所有宏都唤醒具有请求状态的所有非互斥进程(参见上一项)。
+- 名字中含有“nr”字符串的宏唤醒给定数的具有请求状态的互斥进程;这个数字是宏的一个参数。名字中含有“all”字符串的宏唤醒具有请求状态的所有互斥进程。最后，名字中不含“nr”或“all”字符串的宏只唤醒具有请求状态的一个互斥进程。
 - 名字中不含有“sync”字符串的宏检查被唤醒进程的优先级是否高于系统中正在运行进程的优先级，并在必要时调用schedule()。这些检查并不是由名字中含有“sync”字符串的宏进行的，造成的结果是高优先级进程的执行稍有延迟。
 - wake_up_locked宏和wake_up宏相类似，仅有的不同是当wait_queue_head_t中的自旋锁已经被持有时要调用wake_up_locked。
 
@@ -1990,28 +1989,52 @@ rlim_max字段是资源限制所允许的最大值。利用getrlimit()和setrlim
 tss_struct结构描述TSS的格式。正如第二章所提到的，init_tss数组为系统上每个不同的CPU存放一个TSS。在每次进程切换时，内核都更新TSS的某些字段以便相应的CPU控制单元可以安全地检索到它需要的信息。因此，TSS反映了CPU上的当前进程的特权级，但不必为没有在运行的进程保留TSS。
 
 ```c
+Processor.h (include\asm-i386)
 struct tss_struct {
-	u32 reserved1;
-	u64 rsp0;	
-	u64 rsp1;
-	u64 rsp2;
-	u64 reserved2;
-	u64 ist[7];
-	u32 reserved3;
-	u32 reserved4;
-	u16 reserved5;
-	u16 io_bitmap_base;
+	unsigned short	back_link,__blh;
+	unsigned long	esp0;
+	unsigned short	ss0,__ss0h;
+	unsigned long	esp1;
+	unsigned short	ss1,__ss1h;	/* ss1 is used to cache MSR_IA32_SYSENTER_CS */
+	unsigned long	esp2;
+	unsigned short	ss2,__ss2h;
+	unsigned long	__cr3;
+	unsigned long	eip;
+	unsigned long	eflags;
+	unsigned long	eax,ecx,edx,ebx;
+	unsigned long	esp;
+	unsigned long	ebp;
+	unsigned long	esi;
+	unsigned long	edi;
+	unsigned short	es, __esh;
+	unsigned short	cs, __csh;
+	unsigned short	ss, __ssh;
+	unsigned short	ds, __dsh;
+	unsigned short	fs, __fsh;
+	unsigned short	gs, __gsh;
+	unsigned short	ldt, __ldth;
+	unsigned short	trace, io_bitmap_base;
 	/*
 	 * The extra 1 is there because the CPU will access an
 	 * additional byte beyond the end of the IO permission
 	 * bitmap. The extra byte must be all 1 bits, and must
-	 * be within the limit. Thus we have:
-	 *
-	 * 128 bytes, the bitmap itself, for ports 0..0x3ff
-	 * 8 bytes, for an extra "long" of ~0UL
+	 * be within the limit.
 	 */
-	unsigned long io_bitmap[IO_BITMAP_LONGS + 1];
-} __attribute__((packed)) ____cacheline_aligned;
+	unsigned long	io_bitmap[IO_BITMAP_LONGS + 1];
+	/*
+	 * Cache the current maximum and the last task that used the bitmap:
+	 */
+	unsigned long io_bitmap_max;
+	struct thread_struct *io_bitmap_owner;
+	/*
+	 * pads the TSS to be cacheline-aligned (size is 0x100)
+	 */
+	unsigned long __cacheline_filler[35];
+	/*
+	 * .. and then another 0x100 bytes for emergency kernel stack
+	 */
+	unsigned long stack[64];
+} __attribute__((packed));
 ```
 
 每个TSS有它自己8字节的任务状态段描述符(Task State Segment Descriptor, TSSD )。这个描述符包括指向TSS起始地址的32位Base字段，20位Limit字段。TSSD的S标志位被清0，以表示相应的TSS是系统段的事实(参见第二章“段描述符”一节)。
@@ -2039,13 +2062,13 @@ Type字段置为11或9以表示这个段实际上是一个TSS。在Intel的原�
 
 ##### switch_to宏
 
-进程切换的第二步由switch_to宏执行。它是内核中与硬件关系最密切的例程之一，首先，该宏有三个参数，它们是prev，next和last。prev和next是局部变量prev和next的占位符，即它们是输入参数，分另表示被替换进程和新进程描述符的地址在内存中的位置。
+进程切换的第二步由switch_to宏执行。它是内核中与硬件关系最密切的例程之一，首先，该宏有三个参数，它们是prev，next和last。prev和next是局部变量prev和next的占位符，即它们是输入参数，分别表示被替换进程和新进程描述符的地址在内存中的位置。
 
 那第三个参数last呢？在任何进程切换中，涉及到三个进程而不是两个。假设内核决定暂停进程A而激活进程B。在schedule()函数中，prev指向A的描述符而next指向B的描述符。switch_to宏一但使A暂停，A的执行流就冻结。
 
-随后，当内核想再次此激活A，就必须暂停另一个进程C(这通常不同于B)，于是就要用prev指向C而next指向A来执行另一个switch_to宏。当A恢复它的执行流时，就会找到它原来的内核栈，于是prev局部变缺还是指向A的描述符而next指向B的描述符。此时，代表进程A执行的内核就失去了对C的任何引用。但是，事实表明这个引用对于完成进程切换是很有用的(更多细节参见第七章)。
+随后，当内核想再次此激活A，就必须暂停另一个进程C(这通常不同于B)，于是就要用prev指向C而next指向A来执行另一个switch_to宏。当A恢复它的执行流时，就会找到它原来的内核栈，于是prev局部变量还是指向A的描述符而next指向B的描述符。此时，代表进程A执行的内核就失去了对C的任何引用。但是，事实表明这个引用对于完成进程切换是很有用的(更多细节参见第七章)。
 
-switch_to宏的最后一个参数是输出参数，它表示宏把进程C的描述符地址写在内存的什么位置了(这是在A恢复执行之后完成的)。在进程切换之前，宏把第一个输入参数prey(即在A的内核堆栈中分配的prev局部变量)表示的变量的内容存人CPU的eax寄存器。在完成进程切换，A已经恢复执行时，宏把CPU的eax寄存器的内容写入由第三个输出参数——last所指示的A在内存中的位置。因为CPU寄存器不会在切换点发生变化，所以C的描述符地址也存在内存的这个位置。在schedule()执行过程中，参数last指向A的局部变量prev，所以prev被C的地址覆盖。
+switch_to宏的最后一个参数是输出参数，它表示宏把进程C的描述符地址写在内存的什么位置了(这是在A恢复执行之后完成的)。在进程切换之前，宏把第一个输入参数prev(即在A的内核堆栈中分配的prev局部变量)表示的变量的内容存人CPU的eax寄存器。在完成进程切换，A已经恢复执行时，宏把CPU的eax寄存器的内容写入由第三个输出参数——last所指示的A在内存中的位置。因为CPU寄存器不会在切换点发生变化，所以C的描述符地址也存在内存的这个位置。在schedule()执行过程中，参数last指向A的局部变量prev，所以prev被C的地址覆盖。
 
 下图显示了进程A,B,C内核堆栈的内容以及eax寄存器的内容。必须注意的是：图中显示的是在被eax寄存器的内容覆盖以前的prev局部变量的值。
 
@@ -2064,10 +2087,10 @@ switch_to宏的最后一个参数是输出参数，它表示宏把进程C的描�
 
    ```c
    pushfl
-   pushl $ebp
+   pushl %ebp
    ```
 
-3. 把esp的内容保存到prey->thread.esp中以使该字段指向prev内核栈的栈顶：
+3. 把esp的内容保存到prev->thread.esp中以使该字段指向prev内核栈的栈顶：
 
    ```c
    movl %esp, 484(%eax)
@@ -2097,7 +2120,7 @@ switch_to宏的最后一个参数是输出参数，它表示宏把进程C的描�
 8. 这里被进程B替换的进程A再次获得CPU:它执行一些保存eflags和ebp寄存器内容的指令，这两条指令的第一条指令被标记为1。
   ```c
   1:
-  	popl $ebp
+  	popl %%ebp
   	popfl
   ```
 
@@ -2114,7 +2137,7 @@ switch_to宏的最后一个参数是输出参数，它表示宏把进程C的描�
 
 ##### \_\_switch_to()函数
 
-\_\_switch_to()函数执行大多数开始于switch_to()宏的进程切换。这个函数作用于prev_p和next_p参数，这两个参数表示前一个进程和新进程。这个函数的调用不同于一般函数的调用，因为\_\_switch_to()从eax和edx取参数prev_p和next_p(fastcall，ecx、edx，我们在前面已看到这些参数就是保存在那里)，而不像大多数函数一样从栈中取参数。为了强迫函数从寄存器取它的参数，内核利用\_\_attribute\_\_和regparm关键字，这两个关键字是C语言非标准的扩展名，由gcc编译程序实现。在include/asm-1386/system.h头文件中，\_\_switch_to()函数的声明如下：
+\_\_switch_to()函数执行大多数开始于switch_to()宏的进程切换。这个函数作用于prev_p和next_p参数，分别表示前一个进程和新进程。这个函数的调用不同于一般函数的调用，因为\_\_switch_to()从eax和edx取参数prev_p和next_p(fastcall，ecx、edx，我们在前面已看到这些参数就是保存在那里)，而不像大多数函数一样从栈中取参数。为了强迫函数从寄存器取它的参数，内核利用\_\_attribute\_\_和regparm关键字，这两个关键字是C语言非标准的扩展名，由gcc编译程序实现。在include/asm-1386/system.h头文件中，\_\_switch_to()函数的声明如下：
 
 	__switch_to(struct task_struct *prev, struct task_struct *next}
 	__attribute__(regparm(3));
@@ -2127,23 +2150,15 @@ switch_to宏的最后一个参数是输出参数，它表示宏把进程C的描�
       __unlazy_fpu(prev_p);
       ```
 
-      ​
-
 2. 执行smp_processor_id()宏获得本地(local)CPU的下标，即执行代码的CPU。该宏从当前进程的thread_info结构的cpu字段获得下标并将它保存到cpu局部变量。
 
-      ​
-
-3. 把next->thread.esp0装入对应于本地CPU的TSS的esp0字段;将在第十章的“通过sysenter指令发生系统调用”一节看到，以后任何由sysenter汇编指令产生的从用户态到内核态的特权级转换将把这个地址拷贝到esp寄存器中:
+3. 把next->thread.esp0装入对应于本地CPU的TSS的esp0字段；将在第十章的“通过sysenter指令发生系统调用”一节看到，以后任何由sysenter汇编指令产生的从用户态到内核态的特权级转换将把这个地址拷贝到esp寄存器中：
 
       ```c
       init_tss[cpu].esp0=next->thread.esp0;
       ```
 
-      ​
-
-4. 把next_p进程使用的线程局部存储(TLS)段装入本地CPU的全局描述符表;三
-  个段选择符保存在进程描述符内的tls_array数组中(参见第二章的“Linu、中的
-  分段”一节)。
+4. 把next_p进程使用的线程局部存储(TLS)段装入本地CPU的全局描述符表；三个段选择符保存在进程描述符内的tls_array数组中(参见第二章的“Linu、中的分段”一节)。
 
   ```c
   cpu_gdt_table[cpu}[6] = next->thread.tls_array[0];
@@ -2151,10 +2166,7 @@ switch_to宏的最后一个参数是输出参数，它表示宏把进程C的描�
   cpu_gdt_table[cpu][8] = next->thread.tls_array[2];
   ```
 
-  ​
-
-5. 把fs和gs段寄存器的内容分别存放在prev_p->thread.fs和prev_p->thread.gs
-  中，对应的汇编语言指令是：
+5. 把fs和gs段寄存器的内容分别存放在prev_p->thread.fs和prev_p->thread.gs中，对应的汇编语言指令是：
 
   ```C
   movl %fs，40(%esi)
@@ -2162,8 +2174,6 @@ switch_to宏的最后一个参数是输出参数，它表示宏把进程C的描�
   ```
 
   esi寄存器指向prev_p->thread结构。
-
-  ​
 
 6. 如果fs或gs段寄存器已经被prev_p或next_p进程中的任意一个使用(也就是说如果它们有一个非0的值)，则将next_p进程的thread_struct描述符中保存的值装入这些寄存器中。这一步在逻辑上补充了前一步中执行的操作。主要的汇编语言指令如下：
 
@@ -2174,9 +2184,7 @@ switch_to宏的最后一个参数是输出参数，它表示宏把进程C的描�
 
        ebx寄存器指向next_p->thread结构。代码实际上更复杂，因为当它检测到一个无效的段寄存器值时，CPU可能产生一个异常。代码采用一种“修正(fix-up)”途径来考虑这种可能性(参见第十章“动态地址检查:修正代码”一节)。
 
-      ​
-
-7. 用next_p->thread.debugreg数组的内容装载dr0，……，dr7中的6个调试寄存器(x86调试器允许进程被硬件监控。最多可定义4个断点区域)。只有在next_p被挂起时正在使用调试寄存器(也就是说，next_p->thread.debugreg[7]字段不为0)，这种操作才能进行。这些寄存器不需要被保存，因为只有当一个调试器想要监控prev时prev_p->thread.debugreg才会被修改。
+7. 用next_p->thread.debugreg数组的内容装载dr0，…，dr7中的6个调试寄存器(x86调试器允许进程被硬件监控。最多可定义4个断点区域)。只有在next_p被挂起时正在使用调试寄存器(也就是说，next_p->thread.debugreg[7]字段不为0)，这种操作才能进行。这些寄存器不需要被保存，因为只有当一个调试器想要监控prev时prev_p->thread.debugreg才会被修改。
 
       ```c
       if  (next_p->thread.debugreg[7]){
@@ -2197,33 +2205,34 @@ switch_to宏的最后一个参数是输出参数，它表示宏把进程C的描�
   	handle_io_bitmap(&next_p->thread, &init_tss[cpu]);
   ```
 
-
-  因为进程很少修改I/O权限位图，所以该位图在“懒”模式中被处理:当且仅当一个进程在当前时间片内实际访问I/O端口时，真实位图才被拷贝到本地CPU的TSS中。进程的定制I/O权限位图被保存在thread_info结构的io_bitmap_ptr字段指向的缓冲区中。handle_io_bitmap()函数为next_p进程设置本地CPU使用的TSS的io_bitmap字段如下：
+  因为进程很少修改I/O权限位图，所以该位图在“懒”模式中被处理：当且仅当一个进程在当前时间片内实际访问I/O端口时，真实位图才被拷贝到本地CPU的TSS中。进程的定制I/O权限位图被保存在thread_info结构的io_bitmap_ptr字段指向的缓冲区中。handle_io_bitmap()函数为next_p进程设置本地CPU使用的TSS的io_bitmap字段如下：
 
   - 如果next_p进程不拥有自己的I/O权限位图，则TSS的io_bitmap字段被设为0x8000。
 
 
   - 如果next_p进程拥有自己的I/O权限位图，则TSS的io_bitmap字段被设为0x9000。
 
-  TSS的io_bitmap字段应当包含一个在TSS中的偏移量，其中存放实际位图。无论何时用户态进程试图访问一个1/O端口，0x8000和0x9000指向TSS界限之外并将因此引起“General protection”异常(参见第四章的“异常”一节)。do_general_protection()异常处理程序将检查保存在io_bitmap字段的值;如果是0x8000,函数发送一个SIGSEGV信号给用户态进程;如果是0x9000,函数把进程位图(由thread_info结构中的io_bitmap_ptr字段指示)拷贝到本地CPU的TSS中，把io_bitmap字段设为实际位图的偏移(104)，并强制再一次执行有缺陷的汇编语言指令。
+    TSS的io_bitmap字段应当包含一个在TSS中的偏移量，其中存放实际位图。无论何时用户态进程试图访问一个1/O端口，0x8000和0x9000指向TSS界限之外并将因此引起“General protection”异常(参见第四章的“异常”一节)。
+
+    do_general_protection()异常处理程序将检查保存在io_bitmap字段的值;如果是0x8000,函数发送一个SIGSEGV信号给用户态进程;如果是0x9000,函数把进程位图(由thread_info结构中的io_bitmap_ptr字段指示)拷贝到本地CPU的TSS中，把io_bitmap字段设为实际位图的偏移(104)，并强制再一次执行有缺陷的汇编语言指令。
 
 9. 终止。\_\_switch_to() C函数通过使用下列声明结束：
 
-      ```c
-       return prev_p;
-      ```
 
-      由编译器产生的相应汇编语言指令是:
-        	
+```c
+ return prev_p;
+```
 
-      ```c
-      movl %edi, %eax
-      ret
-      ```
+​	由编译器产生的相应汇编语言指令是：  	
 
-      prev_p参数(现在在edi中)被拷贝到eax，因为缺省情况下任何C函数的返回值被传递给eax寄存器。注意eax的值因此在调用\_\_switch_to()的过程中被保护起来;这非常重要，因为调用switch_to宏时会假定eax总是用来存放将被替换的进程描述符的地址。
+```c
+movl %edi, %eax
+ret
+```
 
-      汇编语言指令ret把栈顶保存的返回地址装人eip程序计数器。不过，通过简单地跳转到\_\_switch_to()函数来调用该函数。因此，ret汇编指令在栈中找到标号为1的指令的地址，其中标号为1的地址是由switch_to宏推入栈中的。如果因为next第一次执行而以前从未被挂起，\_\_switch_to()就找到ret_from_fork()函数的起始地址(参见本章后面“clone(),fork()和vfork()系统调用一节”)。
+​	prev_p参数(现在在edi中)被拷贝到eax，因为缺省情况下任何C函数的返回值被传递给eax寄存器。注意eax的值因此在调用\_\_switch_to()的过程中被保护起来;这非常重要，因为调用switch_to宏时会假定eax总是用来存放将被替换的进程描述符的地址。
+
+​	汇编语言指令ret把栈顶保存的返回地址装人eip程序计数器。不过，通过简单地跳转到\_\_switch_to()函数来调用该函数。因此，ret汇编指令在栈中找到标号为1的指令的地址，其中标号为1的地址是由switch_to宏推入栈中的。如果因为next第一次执行而以前从未被挂起，\_\_switch_to()就找到ret_from_fork()函数的起始地址(参见本章后面“clone(),fork()和vfork()系统调用一节”)。
 
 #### 保存和加载FPU、MMX和XMM寄存器
 
@@ -2676,6 +2685,8 @@ release_task()函数从僵死进程的描述符中分离出最后的数据结构
    - 释放进程描述符以及thread_info描述符和内核态堆栈所占用的内存区域。
 
 ## 第4章 中断与异常
+
+
 
 ## 第5章 内核同步
 
