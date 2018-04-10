@@ -1,5 +1,7 @@
 # Study-notes
 
+git add -A; git commit -m "backup to git"; git push origin master;
+
 此项目的目的是对之前学习的一些东西重做笔记，对一些模块（或类别）做整理。书目暂时先这些。
 
 计划：
